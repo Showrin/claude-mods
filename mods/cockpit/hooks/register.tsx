@@ -222,7 +222,7 @@ export const register: Register = (on, options) => {
   })
 
   // Read: uncached input; Write: generated output; Cache Read / Cache Write:
-  // input served from and written to the prompt cache. Subagents' turns count too.
+  // input served from and written to the prompt cache. Nested tasks' turns count too.
   on('turn.complete', async ($, e, next) => {
     const u = e.usage
     if (u) {
