@@ -7,13 +7,13 @@ Each mod lives in its own folder under `mods/`, and the repo is also a plugin ma
 
 | Mod | What it does |
 | --- | --- |
-| [usage-band](mods/usage-band) | A bordered band above the prompt: context fill and what takes it, 5-hour and weekly limits with reset times, token usage and cost. |
+| [cockpit](mods/cockpit) | A bordered band above the prompt: context fill and what takes it, 5-hour and weekly limits with reset times, token usage and cost. |
 
 ## Install
 
 ```sh
 claude plugin marketplace add F:/works/personal/claude-mods
-claude plugin install usage-band@claude-mods
+claude plugin install cockpit@claude-mods
 ```
 
 Claude Code reads an installed mod straight from this folder: after editing one, run `/reload-plugins` in a session.
@@ -21,7 +21,7 @@ Claude Code reads an installed mod straight from this folder: after editing one,
 To try a mod for one session without installing it:
 
 ```sh
-claude --plugin-dir mods/usage-band
+claude --plugin-dir mods/cockpit
 ```
 
 ## Adding a mod

@@ -5,11 +5,11 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Category, Context, Limit, Tokens } from '../types'
 
-const limits = atom({ plugin: 'usage-band', key: 'limits' } as const, [])
-const costUsd = atom({ plugin: 'usage-band', key: 'costUsd' } as const, null)
-const minute = atom({ plugin: 'usage-band', key: 'minute' } as const, 0)
-const tokens = atom({ plugin: 'usage-band', key: 'tokens' } as const, null)
-const context = atom({ plugin: 'usage-band', key: 'context' } as const, null)
+const limits = atom({ plugin: 'cockpit', key: 'limits' } as const, [])
+const costUsd = atom({ plugin: 'cockpit', key: 'costUsd' } as const, null)
+const minute = atom({ plugin: 'cockpit', key: 'minute' } as const, 0)
+const tokens = atom({ plugin: 'cockpit', key: 'tokens' } as const, null)
+const context = atom({ plugin: 'cockpit', key: 'context' } as const, null)
 
 const LABELS: Record<string, string> = {
   five_hour: '5h',

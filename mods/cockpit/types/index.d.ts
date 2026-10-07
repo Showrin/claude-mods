@@ -21,7 +21,7 @@ export type Category = { name: string; tokens: number; color: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-band': {
+    'cockpit': {
       limits: Limit[]; costUsd: number | null; minute: number; tokens: Tokens | null
       context: Context | null
     }

@@ -93,7 +93,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       changed: ['rateLimits', 'cost', 'context'],
     })
 
-    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
 
     expect((await ui.find({ key: 'bar', text: /^5h/ }))?.text).toContain('5h ▬▬▬▬▬▬──── 38% left')
     expect((await ui.find({ key: 'reset', text: /12:30/ }))?.text).toContain('⏳ 12:30 PM (2h 30m)')
@@ -113,7 +113,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.turn.complete({ ...turn, turnId: 'a', usage: { ...usage, input_tokens: 500, output_tokens: 1000 } })
     await $.turn.complete({ ...turn, turnId: 'b', usage: { ...usage, input_tokens: 0, output_tokens: 234 } })
 
-    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
     expect((await ui.find({ key: 'io' }))?.text).toBe('Read/Write 500/1.2k')
     expect((await ui.find({ key: 'cache' }))?.text).toBe('Cache R/W    18k/1k')
     expect((await ui.find({ key: 'tokens' }))?.text).toBe('Tokens 20.7k')
@@ -121,7 +121,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
   test(`band waits before any reading on ${surface}`, async ($, on) => {
     engine(on)
-    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
 
     expect(await ui.find({ text: /waiting for the first reply/ })).toBeDefined()
   })

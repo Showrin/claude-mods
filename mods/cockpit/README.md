@@ -1,4 +1,4 @@
-# usage-band
+# cockpit
 
 A bordered band right above the Claude Code prompt:
 
@@ -29,6 +29,6 @@ Change it under `/config`.
 ## Develop
 
 ```sh
-claude plugin validate mods/usage-band
-claude plugin test mods/usage-band
+claude plugin validate mods/cockpit
+claude plugin test mods/cockpit
 ```
