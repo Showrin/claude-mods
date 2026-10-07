@@ -1,6 +1,6 @@
 # claude-mods
 
-My Claude Code mods: plugins of function hooks that change what Claude Code shows and does.
+Claude Code mods: plugins of function hooks that change what Claude Code shows and does.
 Each mod lives in its own folder under `mods/`, and the repo is also a plugin marketplace, so any of them installs straight from here.
 
 ## Mods
@@ -13,12 +13,35 @@ Each mod lives in its own folder under `mods/`, and the repo is also a plugin ma
 
 ## Install
 
+Add the marketplace once, then install any mod from it:
+
 ```sh
-claude plugin marketplace add F:/works/personal/claude-mods
+claude plugin marketplace add Showrin/claude-mods
 claude plugin install cockpit@claude-mods
 ```
 
-Claude Code reads an installed mod straight from this folder: after editing one, run `/reload-plugins` in a session.
+Or from inside a Claude Code session:
+
+```
+/plugin marketplace add Showrin/claude-mods
+/plugin install cockpit@claude-mods
+```
+
+The mod loads in your next session. To get new versions later:
+
+```sh
+claude plugin marketplace update claude-mods
+claude plugin update cockpit@claude-mods
+```
+
+## Develop
+
+Working from a clone, add the folder as the marketplace instead: Claude Code then reads each mod straight from it, so `/reload-plugins` picks up an edit with no reinstall.
+
+```sh
+claude plugin marketplace add ./claude-mods
+claude plugin install cockpit@claude-mods
+```
 
 To try a mod for one session without installing it:
 
