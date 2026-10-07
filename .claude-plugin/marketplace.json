@@ -1,0 +1,12 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "showrin96", "email": "showrin96@gmail.com" },
+  "metadata": { "description": "My Claude Code mods" },
+  "plugins": [
+    {
+      "name": "usage-band",
+      "source": "./mods/usage-band",
+      "description": "Shows context, 5-hour and weekly limits, token usage and cost right above the prompt"
+    }
+  ]
+}

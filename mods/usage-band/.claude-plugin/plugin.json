@@ -1,0 +1,14 @@
+{
+  "name": "usage-band",
+  "version": "0.1.0",
+  "description": "Shows 5-hour, weekly and on-demand usage left, reset times and session cost right above the prompt",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "timezone": {
+      "type": "string",
+      "title": "Timezone",
+      "description": "IANA timezone for reset times, e.g. Asia/Dhaka or America/New_York; 'system' uses this computer's timezone",
+      "default": "system"
+    }
+  }
+}
