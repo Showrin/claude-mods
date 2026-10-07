@@ -1,7 +1,12 @@
 {
   "name": "claude-mods",
-  "owner": { "name": "showrin96", "email": "showrin96@gmail.com" },
-  "metadata": { "description": "My Claude Code mods" },
+  "owner": {
+    "name": "Showrin Barua",
+    "email": "showrin96@gmail.com"
+  },
+  "metadata": {
+    "description": "My Claude Code mods"
+  },
   "plugins": [
     {
       "name": "usage-band",
