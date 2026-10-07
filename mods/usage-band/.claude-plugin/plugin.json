@@ -4,7 +4,7 @@
   "description": "Shows context, 5-hour and weekly limits, token usage and cost right above the prompt",
   "author": {
     "name": "Showrin Barua",
-    "email": "showrin96@gmail.com"
+    "email": "showrinece15@gmail.com"
   },
   "types": "./types/index.d.ts",
   "userConfig": {
