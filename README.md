@@ -8,6 +8,7 @@ Each mod lives in its own folder under `mods/`, and the repo is also a plugin ma
 | Mod | What it does |
 | --- | --- |
 | [cockpit](mods/cockpit) | A bordered band above the prompt: context fill and what takes it, 5-hour and weekly limits with reset times, token usage and cost. |
+| [turn-memo](mods/turn-memo) | A one-line memo beneath every reply: tokens, read/write, cache read/write and running cost. |
 
 ![cockpit](mods/cockpit/screenshot.png)
 

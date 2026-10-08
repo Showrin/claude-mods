@@ -12,6 +12,11 @@
       "name": "cockpit",
       "source": "./mods/cockpit",
       "description": "Shows context, 5-hour and weekly limits, token usage and cost right above the prompt"
+    },
+    {
+      "name": "turn-memo",
+      "source": "./mods/turn-memo",
+      "description": "Prints a one-line memo (tokens, cache, cost) beneath every reply"
     }
   ]
 }
