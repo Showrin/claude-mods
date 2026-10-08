@@ -119,6 +119,17 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ key: 'tokens' }))?.text).toBe('Tokens 20.7k')
   })
 
+  test(`turn.complete self-heals tokens stuck at null on ${surface}`, async ($, on) => {
+    engine(on)
+    const usage = { model: 'm', input_tokens: 500, output_tokens: 1000, cache_read_input_tokens: 9000, cache_creation_input_tokens: 500 }
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, reason: 'answer', turnId: 'a', usage })
+
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
+    expect((await ui.find({ key: 'io' }))?.text).toBe('Read/Write 500/1k')
+    expect((await ui.find({ key: 'cache' }))?.text).toBe('Cache R/W  9k/500')
+    expect((await ui.find({ key: 'tokens' }))?.text).toBe('Tokens 11k')
+  })
+
   test(`band waits before any reading on ${surface}`, async ($, on) => {
     engine(on)
     const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })

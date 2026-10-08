@@ -226,17 +226,21 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const u = e.usage
     if (u) {
-      await update($, tokens, t =>
-        t
-          ? {
-              ...t,
-              read: t.read + u.input_tokens,
-              write: t.write + u.output_tokens,
-              cacheRead: t.cacheRead + u.cache_read_input_tokens,
-              cacheWrite: t.cacheWrite + u.cache_creation_input_tokens,
-            }
-          : t,
-      )
+      // Self-heals from a `tokens` session.start never managed to set: starts
+      // counting from this turn rather than staying stuck at nothing forever.
+      // A failed lookup must not block the write below, or the heal never happens.
+      const startedAt = (await read($, tokens))?.startedAt ?? (await $.session.usage().catch(() => null))?.startedAt ?? Date.now()
+      await update($, tokens, t => {
+        const base = t ?? { startedAt, isFull: false, ...ZERO }
+
+        return {
+          ...base,
+          read: base.read + u.input_tokens,
+          write: base.write + u.output_tokens,
+          cacheRead: base.cacheRead + u.cache_read_input_tokens,
+          cacheWrite: base.cacheWrite + u.cache_creation_input_tokens,
+        }
+      })
     }
 
     return next(e)
