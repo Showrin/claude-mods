@@ -1,18 +1,11 @@
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
 
-/** What trips a pause: the window to wait out, and why, as the status line says it. */
-export type Trip = { kind: string; resetsAt: string; reason: string }
-
-/** A pause in one project: what tripped it and the handoff written for it. */
-export type Pause = Trip & { pausedAt: number; handoffPath?: string }
-
-/** The three settings: each window's threshold, and the on-demand budget (0: none). */
-export type Settings = { fiveHour: number; weekly: number; budgetUsd: number }
-
-/** On-demand spend so far: the session's cost when a window first read full. */
-export type Spend = { resetsAt: string; startedAt: number; baseUsd: number }
+import type { Pause, Settings, Spend, Trip } from '../types'
 
 const COMMAND = 'savior'
+// The pause in force, mirrored from the store for what the band draws.
+const pauseState = atom({ plugin: 'on-demand-savior', key: 'pause' } as const, null)
 const WATCHED = ['five_hour', 'seven_day']
 const LABELS: Record<string, string> = { five_hour: '5-hour', seven_day: 'weekly' }
 const DEFAULT_THRESHOLD = 96
@@ -127,6 +120,16 @@ async function getPause($: EngineInterface) {
   return (await $.store.get(await key($))) as Pause | undefined
 }
 
+// Keeps the pause in the store (across sessions) and in state (for the band).
+async function savePause($: EngineInterface, pause: Pause | undefined) {
+  if (pause) {
+    await $.store.set(await key($), pause)
+  } else {
+    await $.store.delete(await key($))
+  }
+  await update($, pauseState, () => pause ?? null)
+}
+
 // The pause in force: enabled, and its window not yet reset.
 async function active($: EngineInterface) {
   const pause = await getPause($)
@@ -142,16 +145,16 @@ function stopPoll() {
   poll = undefined
 }
 
-async function resume($: EngineInterface) {
+async function resume($: EngineInterface, toast: string) {
   const pause = await getPause($)
   stopPoll()
   $.ui.status(undefined)
   if (!pause) {
     return
   }
-  await $.store.delete(await key($))
+  await savePause($, undefined)
   const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
-  $.ui.toast('🛟 Limit reset: resuming from the handoff')
+  $.ui.toast(toast)
   // Off this dispatch: a command.run hook may not wait on a turn of its own.
   $.clock.after(0, () => void $.prompt.submit({ text: resumePrompt(pause.handoffPath, doc) }))
 }
@@ -165,7 +168,7 @@ function arm($: EngineInterface) {
     if (!pause || !(await isEnabled($))) {
       stopPoll()
     } else if ((await $.clock.now()) >= resumesAt(pause)) {
-      await resume($)
+      await resume($, '🛟 Limit reset: resuming from the handoff')
     }
   })
 }
@@ -178,7 +181,7 @@ async function pauseSession($: EngineInterface, trip: Trip) {
   try {
     const now = await $.clock.now()
     const paused: Pause = { ...trip, pausedAt: now }
-    await $.store.set(await key($), paused)
+    await savePause($, paused)
     $.ui.status(pausedLine(paused, now))
     if (turnId) {
       await $.turn.abort({ turnId }).catch(() => undefined)
@@ -193,7 +196,7 @@ async function pauseSession($: EngineInterface, trip: Trip) {
     if (!(await getPause($))) {
       return
     }
-    await $.store.set(await key($), { ...paused, handoffPath })
+    await savePause($, { ...paused, handoffPath })
     $.ui.toast(`🛟 Paused at ${paused.reason}: handoff saved to ${handoffPath}`)
     arm($)
   } finally {
@@ -263,9 +266,10 @@ export const register: Register = (on, options) => {
     })
     // A pause from an earlier session in this project: wait it out, or resume
     // from its handoff right away if the window already reset.
-    const paused = await getPause($)
-    if (paused && (await isEnabled($))) {
-      $.ui.status(pausedLine(paused, await $.clock.now()))
+    const pause = await getPause($)
+    if (pause && (await isEnabled($))) {
+      await update($, pauseState, () => pause)
+      $.ui.status(pausedLine(pause, await $.clock.now()))
       arm($)
     }
 
@@ -276,7 +280,7 @@ export const register: Register = (on, options) => {
     const action = e.args.trim().toLowerCase()
     if (action === 'off') {
       await $.store.set('enabled', false)
-      await $.store.delete(await key($))
+      await savePause($, undefined)
       stopPoll()
       $.ui.status(undefined)
     } else if (action === 'on') {
@@ -288,7 +292,7 @@ export const register: Register = (on, options) => {
       if (!(await getPause($))) {
         return { text: 'on-demand-savior: nothing is paused.' }
       }
-      await resume($)
+      await resume($, '🛟 Resuming from the handoff')
 
       return { text: 'on-demand-savior: resumed from the handoff before the reset; this may use on-demand usage.' }
     } else if (action !== '' && action !== 'status') {
@@ -341,5 +345,32 @@ export const register: Register = (on, options) => {
     }
 
     return next(e)
+  })
+
+  // The pause, with the button that ends it, right above the prompt.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const pause = await read($, pauseState)
+    if (!pause || e.props.hasSurvey) {
+      return next(e)
+    }
+    const below = await next(e)
+    const now = await $.clock.now()
+    const { Box, Button, Text } = $.ui.resolve(e)
+
+    return (
+      <Box flexDirection="column">
+        <Box key="savior" flexDirection="row" flexWrap="wrap">
+          <Text color="yellow">{pausedLine(pause, now)} </Text>
+          <Button
+            key="resume"
+            label="Resume the session"
+            hotkey="r"
+            variant="primary"
+            onPress={() => resume($, '🛟 Resuming from the handoff')}
+          />
+        </Box>
+        {below}
+      </Box>
+    )
   })
 }

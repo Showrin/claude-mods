@@ -7,6 +7,7 @@
     "email": "showrinece15@gmail.com"
   },
   "license": "MIT",
+  "types": "./types/index.d.ts",
   "userConfig": {
     "fiveHourThreshold": {
       "type": "number",

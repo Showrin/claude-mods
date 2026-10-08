@@ -7,7 +7,7 @@ Stops Claude before your 5-hour or weekly limit spills into on-demand (extra) us
 3. **Hand off**: the model writes a handoff (goal, done so far, in progress, next steps, key files, open questions) to `.claude/handoffs/handoff-<time>.md` in the project.
 4. **Resume**: a minute after the window resets, the handoff is sent back as a prompt and the work carries on.
 
-The status line shows `🛟 Paused at 5-hour 97% · resumes 3:31 PM` while it waits.
+While it waits, the status line shows `🛟 Paused at 5-hour 97% · resumes 3:31 PM`, and the band right above the prompt shows the same with a **Resume the session** button (`r` once the band has focus) to go on now.
 
 ## Commands
 

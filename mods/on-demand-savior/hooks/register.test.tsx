@@ -91,6 +91,15 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
     return { text: e.text }
   })
   on('tool.call', () => ({ result: 'ran' }) as never)
+  on('ui.render', ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+
+    return (
+      <Box key="engine">
+        <Text>engine</Text>
+      </Box>
+    )
+  })
 
   return { seen, clock }
 }
@@ -217,4 +226,33 @@ test('with a budget, lets that much on-demand usage through, then pauses', { opt
   await clock.settle()
   expect(seen.forks).toBe(1)
   expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('Paused at $2.10 of on-demand')
+})
+
+const BAND = {
+  component: 'AbovePrompt' as const,
+  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 9 }, view: {} },
+}
+
+test('while paused, the band above the prompt has a button that resumes the session', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface, ...BAND })
+    expect(await ui.find({ key: 'resume' })).toBeUndefined()
+    expect(await ui.find({ key: 'engine' })).toBeDefined()
+    await ui.unmount()
+  }
+
+  await $.session.measure(measure(97))
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface: 'terminal', ...BAND })
+  expect((await ui.find({ key: 'savior' }))?.text).toContain('Paused at 5-hour 97%')
+  // What sits beneath in the band still draws.
+  expect(await ui.find({ key: 'engine' })).toBeDefined()
+
+  await ui.press({ key: 'resume' })
+  await clock.settle()
+  expect(seen.submitted[0]).toContain('Goal: ship it')
+  expect(await ui.find({ key: 'resume' })).toBeUndefined()
+  expect((await $.prompt.submit(typed('hi'))).drop).toBeUndefined()
 })
