@@ -12,6 +12,6 @@ export type Spend = { resetsAt: string; startedAt: number; baseUsd: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'on-demand-savior': { pause: Pause | null }
+    'on-demand-savior': { pause: Pause | null; handoff: string | null }
   }
 }

@@ -9,6 +9,8 @@ Stops Claude before your 5-hour or weekly limit spills into on-demand (extra) us
 
 While it waits, the status line shows `🛟 Paused at 5-hour 97% · resumes 3:31 PM`, and the band right above the prompt shows the same with a **Resume the session** button (`r` once the band has focus) to go on now.
 
+The handoff opens in a side pane on the right, with the same button. A pane opened on its own needs a terminal at least 144 columns wide; `/savior handoff` opens it at any width.
+
 ## Commands
 
 | Command | What it does |
@@ -17,6 +19,7 @@ While it waits, the status line shows `🛟 Paused at 5-hour 97% · resumes 3:31
 | `/savior off` | Stop guarding (and clear a pause): Claude goes on into on-demand usage |
 | `/savior on` | Guard again; pauses at once if the last reading is already past the threshold |
 | `/savior resume` | Resume from the handoff now, before the reset (may use on-demand usage) |
+| `/savior handoff` | Show the handoff in the side pane |
 
 On or off is remembered across sessions.
 

@@ -6,6 +6,9 @@ import type { Pause, Settings, Spend, Trip } from '../types'
 const COMMAND = 'savior'
 // The pause in force, mirrored from the store for what the band draws.
 const pauseState = atom({ plugin: 'on-demand-savior', key: 'pause' } as const, null)
+// The handoff's text, for the side pane.
+const handoffState = atom({ plugin: 'on-demand-savior', key: 'handoff' } as const, null)
+const PANE = 'handoff'
 const WATCHED = ['five_hour', 'seven_day']
 const LABELS: Record<string, string> = { five_hour: '5-hour', seven_day: 'weekly' }
 const DEFAULT_THRESHOLD = 96
@@ -130,6 +133,17 @@ async function savePause($: EngineInterface, pause: Pause | undefined) {
   await update($, pauseState, () => pause ?? null)
 }
 
+// Opens the side pane on the handoff; unasked it waits for a wide enough terminal.
+async function showHandoff($: EngineInterface, doc: string) {
+  await update($, handoffState, () => doc)
+  await $.ui.open({ id: PANE, title: 'Handoff' }).catch(() => undefined)
+}
+
+async function closeHandoff($: EngineInterface) {
+  await update($, handoffState, () => null)
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+}
+
 // The pause in force: enabled, and its window not yet reset.
 async function active($: EngineInterface) {
   const pause = await getPause($)
@@ -153,6 +167,7 @@ async function resume($: EngineInterface, toast: string) {
     return
   }
   await savePause($, undefined)
+  await closeHandoff($)
   const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
   $.ui.toast(toast)
   // Off this dispatch: a command.run hook may not wait on a turn of its own.
@@ -199,6 +214,7 @@ async function pauseSession($: EngineInterface, trip: Trip) {
     await savePause($, { ...paused, handoffPath })
     $.ui.toast(`🛟 Paused at ${paused.reason}: handoff saved to ${handoffPath}`)
     arm($)
+    await showHandoff($, doc)
   } finally {
     isPausing = false
   }
@@ -260,8 +276,8 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     await $.command.register({
       name: COMMAND,
-      description: 'Guard against on-demand usage: on, off, status, or resume now',
-      argumentHint: '[on|off|status|resume]',
+      description: 'Guard against on-demand usage: on, off, status, resume now, or show the handoff',
+      argumentHint: '[on|off|status|resume|handoff]',
       immediate: true,
     })
     // A pause from an earlier session in this project: wait it out, or resume
@@ -271,6 +287,10 @@ export const register: Register = (on, options) => {
       await update($, pauseState, () => pause)
       $.ui.status(pausedLine(pause, await $.clock.now()))
       arm($)
+      const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
+      if (doc) {
+        await showHandoff($, doc)
+      }
     }
 
     return result
@@ -281,6 +301,7 @@ export const register: Register = (on, options) => {
     if (action === 'off') {
       await $.store.set('enabled', false)
       await savePause($, undefined)
+      await closeHandoff($)
       stopPoll()
       $.ui.status(undefined)
     } else if (action === 'on') {
@@ -295,8 +316,17 @@ export const register: Register = (on, options) => {
       await resume($, '🛟 Resuming from the handoff')
 
       return { text: 'on-demand-savior: resumed from the handoff before the reset; this may use on-demand usage.' }
+    } else if (action === 'handoff') {
+      const pause = await getPause($)
+      const doc = pause?.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
+      if (!doc) {
+        return { text: 'on-demand-savior: no handoff to show.' }
+      }
+      await showHandoff($, doc)
+
+      return { text: `on-demand-savior: showing the handoff from ${pause!.handoffPath}.` }
     } else if (action !== '' && action !== 'status') {
-      return { text: `on-demand-savior: unknown "${action}". Use /savior on, off, status or resume.` }
+      return { text: `on-demand-savior: unknown "${action}". Use /savior on, off, status, resume or handoff.` }
     }
 
     return { text: await status($) }
@@ -370,6 +400,32 @@ export const register: Register = (on, options) => {
           />
         </Box>
         {below}
+      </Box>
+    )
+  })
+
+  // The side pane: the handoff, and the same button.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const doc = await read($, handoffState)
+    const pause = await read($, pauseState)
+    const now = await $.clock.now()
+    const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+
+    return (
+      <Box flexDirection="column">
+        {pause && (
+          <Box key="paused" flexDirection="row" flexWrap="wrap">
+            <Text color="yellow">{pausedLine(pause, now)} </Text>
+            <Button
+              key="resume"
+              label="Resume the session"
+              hotkey="r"
+              variant="primary"
+              onPress={() => resume($, '🛟 Resuming from the handoff')}
+            />
+          </Box>
+        )}
+        <Markdown key="handoff" text={doc ?? '_No handoff yet._'} />
       </Box>
     )
   })

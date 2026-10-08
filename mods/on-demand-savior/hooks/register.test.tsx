@@ -53,7 +53,7 @@ const slashes = (path: string) => path.replace(/\\/g, '/')
 
 // The engine beneath the mod: what it was asked to abort, write and submit.
 const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, costUsd = 0) => {
-  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0 }
+  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[] }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on, store)
   on('ui.status', () => ({ value: undefined }))
@@ -91,6 +91,16 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
     return { text: e.text }
   })
   on('tool.call', () => ({ result: 'ran' }) as never)
+  on('ui.open', (_$, e) => {
+    seen.opened.push(e.id)
+
+    return { value: { isPlaced: true } } as never
+  })
+  on('ui.close', (_$, e) => {
+    seen.closed.push(e.id)
+
+    return { value: undefined } as never
+  })
   on('ui.render', ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
 
@@ -255,4 +265,37 @@ test('while paused, the band above the prompt has a button that resumes the sess
   expect(seen.submitted[0]).toContain('Goal: ship it')
   expect(await ui.find({ key: 'resume' })).toBeUndefined()
   expect((await $.prompt.submit(typed('hi'))).drop).toBeUndefined()
+})
+
+const PANE_PROPS = {
+  component: 'Pane' as const,
+  requestId: 'handoff',
+  props: { title: 'Handoff', isFocused: false, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} },
+}
+
+test('a pause opens the handoff in a side pane, with the resume button', async ($, on) => {
+  const { seen, clock } = engine(on)
+  const { opened, closed } = seen
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(opened).toEqual(['handoff'])
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface, ...PANE_PROPS })
+    expect((await ui.find({ key: 'handoff' }))?.text).toContain('Goal: ship it')
+    expect(await ui.find({ key: 'resume' })).toBeDefined()
+    await ui.unmount()
+  }
+
+  // Asked for by command, it opens again at any width.
+  expect((await $.command.run({ command: 'savior', args: 'handoff' } as never)).text).toContain('showing the handoff')
+  expect(opened).toEqual(['handoff', 'handoff'])
+
+  const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface: 'terminal', ...PANE_PROPS })
+  await ui.press({ key: 'resume' })
+  await clock.settle()
+  expect(seen.submitted[0]).toContain('Goal: ship it')
+  expect(closed).toEqual(['handoff'])
+  expect((await $.command.run({ command: 'savior', args: 'handoff' } as never)).text).toContain('no handoff')
 })
