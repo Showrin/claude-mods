@@ -53,11 +53,19 @@ const slashes = (path: string) => path.replace(/\\/g, '/')
 
 // The engine beneath the mod: what it was asked to abort, write and submit.
 const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, costUsd = 0) => {
-  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[] }
+  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0 }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on, store)
-  on('ui.status', () => ({ value: undefined }))
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.status', (_$, e) => {
+    seen.status.push(e.text)
+
+    return { value: undefined } as never
+  })
+  on('ui.toast', () => {
+    seen.toasts++
+
+    return { value: undefined } as never
+  })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.usage', () => ({ value: { startedAt: 1, context: CONTEXT, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], cost: { usd: costUsd } } }))
@@ -342,4 +350,15 @@ test('/savior on after an early resume checks again at once', async ($, on) => {
   await $.command.run({ command: 'savior', args: 'on' } as never)
   await clock.settle()
   expect(seen.forks).toBe(2)
+})
+
+test('shows nothing under the prompt: clears an old status line, raises no toasts', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  await $.command.run({ command: 'savior', args: 'resume' } as never)
+  await clock.settle()
+  expect(seen.status).toEqual([undefined])
+  expect(seen.toasts).toBe(0)
 })

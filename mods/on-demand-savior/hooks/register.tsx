@@ -170,7 +170,7 @@ function stopPoll() {
 
 // A resume before the reset ('early', the person's choice) also quiets the
 // checks until that window resets: its readings stay past the threshold.
-async function resume($: EngineInterface, toast: string, isEarly = false) {
+async function resume($: EngineInterface, isEarly = false) {
   const pause = await getPause($)
   stopPoll()
   if (!pause) {
@@ -182,7 +182,6 @@ async function resume($: EngineInterface, toast: string, isEarly = false) {
   await savePause($, undefined)
   await closeHandoff($)
   const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
-  $.ui.toast(toast)
   // Off this dispatch: a command.run hook may not wait on a turn of its own.
   $.clock.after(0, () => void $.prompt.submit({ text: resumePrompt(pause.handoffPath, doc) }))
 }
@@ -196,7 +195,7 @@ function arm($: EngineInterface) {
     if (!pause || !(await isEnabled($))) {
       stopPoll()
     } else if ((await $.clock.now()) >= resumesAt(pause)) {
-      await resume($, '🛟 Limit reset: resuming from the handoff')
+      await resume($)
     }
   })
 }
@@ -224,7 +223,6 @@ async function pauseSession($: EngineInterface, trip: Trip) {
       return
     }
     await savePause($, { ...paused, handoffPath })
-    $.ui.toast(`🛟 Paused at ${paused.reason}: handoff saved to ${handoffPath}`)
     arm($)
     await showHandoff($, doc)
   } finally {
@@ -294,6 +292,8 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    // The band above the prompt says it all; clear a status line an older version left.
+    $.ui.status(undefined)
     await $.command.register({
       name: COMMAND,
       description: 'Guard against on-demand usage: on, off, status, resume now, or show the handoff',
@@ -332,7 +332,7 @@ export const register: Register = (on, options) => {
       if (!(await getPause($))) {
         return { text: 'on-demand-savior: nothing is paused.' }
       }
-      await resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)
+      await resume($, true)
 
       return { text: 'on-demand-savior: resumed from the handoff before the reset; limit checks are off until it, so this may use on-demand usage.' }
     } else if (action === 'handoff') {
@@ -415,7 +415,7 @@ export const register: Register = (on, options) => {
             label="Resume now"
             hotkey="r"
             variant="primary"
-            onPress={() => resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)}
+            onPress={() => resume($, true)}
           />
         </Box>
         {below}
@@ -441,7 +441,7 @@ export const register: Register = (on, options) => {
               label="Resume now"
               hotkey="r"
               variant="primary"
-              onPress={() => resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)}
+              onPress={() => resume($, true)}
             />
           </Box>
         )}
