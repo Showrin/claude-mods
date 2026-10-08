@@ -173,7 +173,6 @@ function stopPoll() {
 async function resume($: EngineInterface, toast: string, isEarly = false) {
   const pause = await getPause($)
   stopPoll()
-  $.ui.status(undefined)
   if (!pause) {
     return
   }
@@ -211,7 +210,6 @@ async function pauseSession($: EngineInterface, trip: Trip) {
     const now = await $.clock.now()
     const paused: Pause = { ...trip, pausedAt: now }
     await savePause($, paused)
-    $.ui.status(pausedLine(paused, now))
     if (turnId) {
       await $.turn.abort({ turnId }).catch(() => undefined)
     }
@@ -307,7 +305,6 @@ export const register: Register = (on, options) => {
     const pause = await getPause($)
     if (pause && (await isEnabled($))) {
       await update($, pauseState, () => pause)
-      $.ui.status(pausedLine(pause, await $.clock.now()))
       arm($)
       const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
       if (doc) {
@@ -325,7 +322,6 @@ export const register: Register = (on, options) => {
       await savePause($, undefined)
       await closeHandoff($)
       stopPoll()
-      $.ui.status(undefined)
     } else if (action === 'on') {
       await $.store.set('enabled', true)
       await $.store.delete(await quietKey($))
@@ -416,7 +412,7 @@ export const register: Register = (on, options) => {
           <Text color="yellow">{pausedLine(pause, now)} </Text>
           <Button
             key="resume"
-            label="Resume the session"
+            label="Resume now"
             hotkey="r"
             variant="primary"
             onPress={() => resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)}
@@ -442,7 +438,7 @@ export const register: Register = (on, options) => {
             <Text color="yellow">{pausedLine(pause, now)} </Text>
             <Button
               key="resume"
-              label="Resume the session"
+              label="Resume now"
               hotkey="r"
               variant="primary"
               onPress={() => resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)}

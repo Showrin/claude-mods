@@ -257,6 +257,7 @@ test('while paused, the band above the prompt has a button that resumes the sess
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface: 'terminal', ...BAND })
   expect((await ui.find({ key: 'savior' }))?.text).toContain('Paused at 5-hour 97%')
+  expect((await ui.find({ key: 'resume' }))?.props).toMatchObject({ label: 'Resume now' })
   // What sits beneath in the band still draws.
   expect(await ui.find({ key: 'engine' })).toBeDefined()
 
