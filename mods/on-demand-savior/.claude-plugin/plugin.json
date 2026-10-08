@@ -1,0 +1,18 @@
+{
+  "name": "on-demand-savior",
+  "version": "0.1.0",
+  "description": "Pauses Claude before the 5-hour or weekly limit spills into on-demand usage, writes a handoff, and resumes from it once the limit resets",
+  "author": {
+    "name": "Showrin Barua",
+    "email": "showrinece15@gmail.com"
+  },
+  "license": "MIT",
+  "userConfig": {
+    "threshold": {
+      "type": "number",
+      "title": "Pause threshold (%)",
+      "description": "Pause once the 5-hour or weekly limit reaches this percent used",
+      "default": 96
+    }
+  }
+}
