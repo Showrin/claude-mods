@@ -8,11 +8,23 @@
   },
   "license": "MIT",
   "userConfig": {
-    "threshold": {
+    "fiveHourThreshold": {
       "type": "number",
-      "title": "Pause threshold (%)",
-      "description": "Pause once the 5-hour or weekly limit reaches this percent used",
+      "title": "5-hour threshold (%)",
+      "description": "Pause once the 5-hour limit reaches this percent used",
       "default": 96
+    },
+    "weeklyThreshold": {
+      "type": "number",
+      "title": "Weekly threshold (%)",
+      "description": "Pause once the weekly limit reaches this percent used",
+      "default": 96
+    },
+    "onDemandBudgetUsd": {
+      "type": "number",
+      "title": "On-demand budget (USD)",
+      "description": "On-demand usage to let through once a limit is used up, then pause; 0 pauses at the thresholds instead",
+      "default": 0
     }
   }
 }

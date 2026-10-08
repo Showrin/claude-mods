@@ -1,13 +1,16 @@
 import type { EngineInterface, Register, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
 
-/** A pause in one project: the window that tripped it and the handoff written for it. */
-export type Pause = {
-  kind: string
-  percent: number
-  resetsAt: string
-  pausedAt: number
-  handoffPath?: string
-}
+/** What trips a pause: the window to wait out, and why, as the status line says it. */
+export type Trip = { kind: string; resetsAt: string; reason: string }
+
+/** A pause in one project: what tripped it and the handoff written for it. */
+export type Pause = Trip & { pausedAt: number; handoffPath?: string }
+
+/** The three settings: each window's threshold, and the on-demand budget (0: none). */
+export type Settings = { fiveHour: number; weekly: number; budgetUsd: number }
+
+/** On-demand spend so far: the session's cost when a window first read full. */
+export type Spend = { resetsAt: string; startedAt: number; baseUsd: number }
 
 const COMMAND = 'savior'
 const WATCHED = ['five_hour', 'seven_day']
@@ -20,18 +23,48 @@ const DAY = 24 * 60 * 60 * 1000
 
 export const label = (kind: string) => LABELS[kind] ?? kind.replace(/_/g, ' ')
 
-export const threshold = (setting: unknown) => {
-  const n = Number(setting)
+export const usd = (amount: number) => `$${amount.toFixed(2)}`
 
-  return Number.isFinite(n) && n > 0 && n <= 100 ? n : DEFAULT_THRESHOLD
+export const settings = (options: Record<string, unknown>): Settings => {
+  const percent = (setting: unknown) => {
+    const n = Number(setting)
+
+    return Number.isFinite(n) && n > 0 && n <= 100 ? n : DEFAULT_THRESHOLD
+  }
+  const budget = Number(options.onDemandBudgetUsd)
+
+  return {
+    fiveHour: percent(options.fiveHourThreshold),
+    weekly: percent(options.weeklyThreshold),
+    budgetUsd: Number.isFinite(budget) && budget > 0 ? budget : 0,
+  }
 }
 
-// The watched window at or past the threshold that resets last (the one to
-// wait out); a window whose reset has passed is stale and never trips.
-export const tripped = (limits: readonly SessionRateLimit[], at: number, now: number) =>
-  limits
-    .filter(l => WATCHED.includes(l.kind) && l.percentUsed >= at && l.resetsAt && Date.parse(l.resetsAt) > now)
-    .sort((a, b) => Date.parse(b.resetsAt!) - Date.parse(a.resetsAt!))[0]
+// The watched windows of a reading, a window whose reset has passed being stale.
+const live = (limits: readonly SessionRateLimit[], now: number) =>
+  limits.filter(l => WATCHED.includes(l.kind) && l.resetsAt && Date.parse(l.resetsAt) > now)
+
+// Of several, the window that resets last: the one to wait out.
+const latest = (limits: readonly SessionRateLimit[]) =>
+  [...limits].sort((a, b) => Date.parse(b.resetsAt!) - Date.parse(a.resetsAt!))[0]
+
+// A window at or past its own threshold.
+export const tripped = (limits: readonly SessionRateLimit[], s: Settings, now: number): Trip | undefined => {
+  const hit = latest(live(limits, now).filter(l => l.percentUsed >= (l.kind === 'five_hour' ? s.fiveHour : s.weekly)))
+
+  return hit && { kind: hit.kind, resetsAt: hit.resetsAt!, reason: `${label(hit.kind)} ${hit.percentUsed}%` }
+}
+
+// A window used up: past it, requests are billed as on-demand usage.
+export const spilled = (limits: readonly SessionRateLimit[], now: number) =>
+  latest(live(limits, now).filter(l => l.percentUsed >= 100))
+
+// The budget spent since the window read full; undefined while there is room.
+export const overBudget = (full: SessionRateLimit, spend: Spend, costUsd: number, budgetUsd: number): Trip | undefined => {
+  const spent = costUsd - spend.baseUsd
+
+  return spent >= budgetUsd ? { kind: full.kind, resetsAt: full.resetsAt!, reason: `${usd(spent)} of on-demand` } : undefined
+}
 
 export const resumesAt = (pause: Pause) => Date.parse(pause.resetsAt) + GRACE_MS
 
@@ -48,7 +81,7 @@ export const stamp = (now: number) => new Date(now).toISOString().slice(0, 19).r
 
 export const handoffPrompt = (pause: Pause) =>
   [
-    `You are being paused: the ${label(pause.kind)} usage limit is at ${pause.percent}%, and going on would spill into on-demand usage.`,
+    `You are being paused to keep usage in bounds (${pause.reason}; the ${label(pause.kind)} limit).`,
     'Write a handoff document that lets you pick this work up after the limit resets, with no other memory of this conversation.',
     'Use Markdown with these sections: Goal; Done so far; In progress (exactly where you stopped, including any half-finished edit);',
     'Next steps (in order); Key files and facts (paths, commands, decisions, gotchas); Open questions for the user.',
@@ -73,10 +106,10 @@ export const resumePrompt = (path: string | undefined, doc: string | undefined) 
     : 'The usage limit has reset. on-demand-savior paused you before it ran into on-demand usage. Pick the work up where you left off.'
 
 const pausedLine = (pause: Pause, now: number) =>
-  `🛟 Paused at ${label(pause.kind)} ${pause.percent}% · resumes ${clockTime(resumesAt(pause), now)}`
+  `🛟 Paused at ${pause.reason} · resumes ${clockTime(resumesAt(pause), now)}`
 
 // Module variables: a reload starts them over, the store keeps the pause itself.
-let at = DEFAULT_THRESHOLD
+let config = settings({})
 let turnId: string | undefined
 let poll: Timer | undefined
 let isPausing = false
@@ -137,14 +170,14 @@ function arm($: EngineInterface) {
   })
 }
 
-async function pauseSession($: EngineInterface, limit: SessionRateLimit) {
+async function pauseSession($: EngineInterface, trip: Trip) {
   if (isPausing || (await getPause($))) {
     return
   }
   isPausing = true
   try {
     const now = await $.clock.now()
-    const paused: Pause = { kind: limit.kind, percent: limit.percentUsed, resetsAt: limit.resetsAt!, pausedAt: now }
+    const paused: Pause = { ...trip, pausedAt: now }
     await $.store.set(await key($), paused)
     $.ui.status(pausedLine(paused, now))
     if (turnId) {
@@ -161,18 +194,38 @@ async function pauseSession($: EngineInterface, limit: SessionRateLimit) {
       return
     }
     await $.store.set(await key($), { ...paused, handoffPath })
-    $.ui.toast(`🛟 ${label(paused.kind)} limit at ${paused.percent}%: paused, handoff saved to ${handoffPath}`)
+    $.ui.toast(`🛟 Paused at ${paused.reason}: handoff saved to ${handoffPath}`)
     arm($)
   } finally {
     isPausing = false
   }
 }
 
-async function check($: EngineInterface, limits: readonly SessionRateLimit[]) {
+// With a budget, the windows run full and on into on-demand usage, counted
+// from the session's cost when one first read full until the budget is spent.
+async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined, now: number) {
+  const full = spilled(limits, now)
+  if (!full || costUsd === undefined) {
+    return undefined
+  }
+  const { startedAt } = await $.session.usage()
+  const spendKey = `spend:${await $.session.cwd()}`
+  const spend = (await $.store.get(spendKey)) as Spend | undefined
+  if (!spend || spend.resetsAt !== full.resetsAt || spend.startedAt !== startedAt) {
+    await $.store.set(spendKey, { resetsAt: full.resetsAt!, startedAt, baseUsd: costUsd })
+
+    return undefined
+  }
+
+  return overBudget(full, spend, costUsd, config.budgetUsd)
+}
+
+async function check($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined) {
   if (isPausing || !(await isEnabled($)) || (await getPause($))) {
     return
   }
-  const hit = tripped(limits, at, await $.clock.now())
+  const now = await $.clock.now()
+  const hit = config.budgetUsd > 0 ? await spentTrip($, limits, costUsd, now) : tripped(limits, config, now)
   if (hit) {
     // Off this dispatch: the pause aborts the turn and waits on the model.
     $.clock.after(0, () => void pauseSession($, hit))
@@ -190,11 +243,15 @@ async function status($: EngineInterface) {
     return `${pausedLine(pause, await $.clock.now())}.${handoff} /savior resume to go on now (may use on-demand usage).`
   }
 
-  return `on-demand-savior is on: pauses at ${at}% of the 5-hour or weekly limit.`
+  const { fiveHour, weekly, budgetUsd } = config
+
+  return budgetUsd > 0
+    ? `on-demand-savior is on: lets ${usd(budgetUsd)} of on-demand usage through once a limit is used up, then pauses.`
+    : `on-demand-savior is on: pauses at 5-hour ${fiveHour}% or weekly ${weekly}%.`
 }
 
 export const register: Register = (on, options) => {
-  at = threshold(options.threshold)
+  config = settings(options)
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -225,7 +282,8 @@ export const register: Register = (on, options) => {
     } else if (action === 'on') {
       await $.store.set('enabled', true)
       // The last reading may already be past the threshold; no new point may come.
-      await check($, (await $.session.usage()).rateLimits)
+      const usage = await $.session.usage()
+      await check($, usage.rateLimits, usage.cost?.usd)
     } else if (action === 'resume') {
       if (!(await getPause($))) {
         return { text: 'on-demand-savior: nothing is paused.' }
@@ -241,8 +299,8 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
-    if (e.changed.includes('rateLimits')) {
-      await check($, e.rateLimits)
+    if (e.changed.includes('rateLimits') || e.changed.includes('cost')) {
+      await check($, e.rateLimits, e.cost?.usd)
     }
 
     return next(e)

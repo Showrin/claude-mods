@@ -2,7 +2,7 @@
 
 Stops Claude before your 5-hour or weekly limit spills into on-demand (extra) usage, then picks the work back up once the limit resets.
 
-1. **Watch**: every usage reading is checked against the threshold (96% by default).
+1. **Watch**: every usage reading is checked against the 5-hour and weekly thresholds (96% by default), or the on-demand budget when one is set.
 2. **Pause**: the running turn is stopped, and new prompts and tool calls are held back.
 3. **Hand off**: the model writes a handoff (goal, done so far, in progress, next steps, key files, open questions) to `.claude/handoffs/handoff-<time>.md` in the project.
 4. **Resume**: a minute after the window resets, the handoff is sent back as a prompt and the work carries on.
@@ -22,7 +22,15 @@ On or off is remembered across sessions.
 
 ## Settings
 
-`threshold`: the percent of the 5-hour or weekly limit to pause at (default `96`), set in `/config`.
+Set in `/config`:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `fiveHourThreshold` | `96` | Pause once the 5-hour limit reaches this percent used |
+| `weeklyThreshold` | `96` | Pause once the weekly limit reaches this percent used |
+| `onDemandBudgetUsd` | `0` | On-demand usage to let through once a limit is used up, then pause |
+
+With a budget above `0`, the thresholds step aside: the limit runs full, on-demand usage is counted from that moment (at API prices, as `/cost` counts it, within this session), and the pause comes once the budget is spent.
 
 ## Good to know
 
