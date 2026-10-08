@@ -412,7 +412,8 @@ export const register: Register = (on, options) => {
     const { Box, Button, Markdown, Text } = $.ui.resolve(e)
 
     return (
-      <Box flexDirection="column">
+      // Two cells either side (about 16px) keep the text off the frame.
+      <Box key="pane" flexDirection="column" paddingX={2}>
         {pause && (
           <Box key="paused" flexDirection="row" flexWrap="wrap">
             <Text color="yellow">{pausedLine(pause, now)} </Text>

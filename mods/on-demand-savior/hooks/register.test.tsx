@@ -284,6 +284,7 @@ test('a pause opens the handoff in a side pane, with the resume button', async (
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface, ...PANE_PROPS })
     expect((await ui.find({ key: 'handoff' }))?.text).toContain('Goal: ship it')
+    expect((await ui.find({ key: 'pane' }))?.props).toMatchObject({ paddingX: 2 })
     expect(await ui.find({ key: 'resume' })).toBeDefined()
     await ui.unmount()
   }
