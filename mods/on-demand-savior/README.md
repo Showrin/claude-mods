@@ -17,8 +17,8 @@ The handoff opens in a side pane on the right, with the same button. A pane open
 | --- | --- |
 | `/savior` or `/savior status` | Whether it is on, and any pause in force |
 | `/savior off` | Stop guarding (and clear a pause): Claude goes on into on-demand usage |
-| `/savior on` | Guard again; pauses at once if the last reading is already past the threshold |
-| `/savior resume` | Resume from the handoff now, before the reset (may use on-demand usage) |
+| `/savior on` | Guard again, ending an early resume's quiet; pauses at once if the last reading is already past the threshold |
+| `/savior resume` | Resume from the handoff now, before the reset. Limit checks stay off until that window resets, so this may use on-demand usage |
 | `/savior handoff` | Show the handoff in the side pane |
 
 On or off is remembered across sessions.

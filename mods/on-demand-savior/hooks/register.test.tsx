@@ -300,3 +300,45 @@ test('a pause opens the handoff in a side pane, with the resume button', async (
   expect(closed).toEqual(['handoff'])
   expect((await $.command.run({ command: 'savior', args: 'handoff' } as never)).text).toContain('no handoff')
 })
+
+test('an early resume stops the checks until that window resets', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface: 'terminal', ...BAND })
+  await ui.press({ key: 'resume' })
+  await clock.settle()
+  expect(seen.submitted).toHaveLength(1)
+
+  // Still past the threshold, and on into on-demand: no second pause.
+  for (const percent of [98, 100]) {
+    await $.session.measure(measure(percent))
+    await clock.settle()
+  }
+  expect(seen.forks).toBe(1)
+  expect((await $.prompt.submit(typed('go on'))).drop).toBeUndefined()
+  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('limit checks are off until')
+
+  // Once the window resets, a new one is guarded again.
+  await clock.set(Date.parse(RESET) + 90_000)
+  await $.session.measure({ ...measure(97), rateLimits: [{ kind: 'five_hour', percentUsed: 97, resetsAt: '2026-10-09T17:00:00Z' }] })
+  await clock.settle()
+  expect(seen.forks).toBe(2)
+})
+
+test('/savior on after an early resume checks again at once', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  await $.command.run({ command: 'savior', args: 'resume' } as never)
+  await clock.settle()
+  await $.session.measure(measure(98))
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+
+  await $.command.run({ command: 'savior', args: 'on' } as never)
+  await clock.settle()
+  expect(seen.forks).toBe(2)
+})

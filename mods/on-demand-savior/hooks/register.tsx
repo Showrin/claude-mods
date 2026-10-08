@@ -115,6 +115,15 @@ async function key($: EngineInterface) {
   return `pause:${await $.session.cwd()}`
 }
 
+async function quietKey($: EngineInterface) {
+  return `quiet:${await $.session.cwd()}`
+}
+
+// Until when an early resume keeps the checks quiet; 0 when it does not.
+async function quietUntil($: EngineInterface) {
+  return Number((await $.store.get(await quietKey($))) ?? 0)
+}
+
 async function isEnabled($: EngineInterface) {
   return (await $.store.get('enabled')) !== false
 }
@@ -159,12 +168,17 @@ function stopPoll() {
   poll = undefined
 }
 
-async function resume($: EngineInterface, toast: string) {
+// A resume before the reset ('early', the person's choice) also quiets the
+// checks until that window resets: its readings stay past the threshold.
+async function resume($: EngineInterface, toast: string, isEarly = false) {
   const pause = await getPause($)
   stopPoll()
   $.ui.status(undefined)
   if (!pause) {
     return
+  }
+  if (isEarly) {
+    await $.store.set(await quietKey($), resumesAt(pause))
   }
   await savePause($, undefined)
   await closeHandoff($)
@@ -244,6 +258,9 @@ async function check($: EngineInterface, limits: readonly SessionRateLimit[], co
     return
   }
   const now = await $.clock.now()
+  if (now < (await quietUntil($))) {
+    return
+  }
   const hit = config.budgetUsd > 0 ? await spentTrip($, limits, costUsd, now) : tripped(limits, config, now)
   if (hit) {
     // Off this dispatch: the pause aborts the turn and waits on the model.
@@ -262,6 +279,11 @@ async function status($: EngineInterface) {
     return `${pausedLine(pause, await $.clock.now())}.${handoff} /savior resume to go on now (may use on-demand usage).`
   }
 
+  const now = await $.clock.now()
+  const quiet = await quietUntil($)
+  if (now < quiet) {
+    return `on-demand-savior is on, but resumed early: limit checks are off until ${clockTime(quiet, now)}, when the window resets. /savior on to check again now.`
+  }
   const { fiveHour, weekly, budgetUsd } = config
 
   return budgetUsd > 0
@@ -306,6 +328,7 @@ export const register: Register = (on, options) => {
       $.ui.status(undefined)
     } else if (action === 'on') {
       await $.store.set('enabled', true)
+      await $.store.delete(await quietKey($))
       // The last reading may already be past the threshold; no new point may come.
       const usage = await $.session.usage()
       await check($, usage.rateLimits, usage.cost?.usd)
@@ -313,9 +336,9 @@ export const register: Register = (on, options) => {
       if (!(await getPause($))) {
         return { text: 'on-demand-savior: nothing is paused.' }
       }
-      await resume($, '🛟 Resuming from the handoff')
+      await resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)
 
-      return { text: 'on-demand-savior: resumed from the handoff before the reset; this may use on-demand usage.' }
+      return { text: 'on-demand-savior: resumed from the handoff before the reset; limit checks are off until it, so this may use on-demand usage.' }
     } else if (action === 'handoff') {
       const pause = await getPause($)
       const doc = pause?.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
@@ -396,7 +419,7 @@ export const register: Register = (on, options) => {
             label="Resume the session"
             hotkey="r"
             variant="primary"
-            onPress={() => resume($, '🛟 Resuming from the handoff')}
+            onPress={() => resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)}
           />
         </Box>
         {below}
@@ -422,7 +445,7 @@ export const register: Register = (on, options) => {
               label="Resume the session"
               hotkey="r"
               variant="primary"
-              onPress={() => resume($, '🛟 Resuming from the handoff')}
+              onPress={() => resume($, '🛟 Resuming from the handoff; limit checks are off until the reset', true)}
             />
           </Box>
         )}
