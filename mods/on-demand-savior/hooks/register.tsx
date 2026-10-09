@@ -33,7 +33,27 @@ export const settings = (options: Record<string, unknown>): Settings => {
     fiveHour: percent(options.fiveHourThreshold),
     weekly: percent(options.weeklyThreshold),
     budgetUsd: Number.isFinite(budget) && budget > 0 ? budget : 0,
+    handoffDir: typeof options.handoffDir === 'string' ? options.handoffDir.trim() : '',
   }
+}
+
+// Where a handoff is saved: the setting's folder (`~` the home folder, a relative
+// one under the project), else the project's .claude/handoffs. Named by project
+// and time, so a shared folder keeps every one apart and nothing is overwritten.
+export const handoffFile = (dir: string, cwd: string, home: string | undefined, now: number) => {
+  const trim = (path: string) => path.replace(/[\\/]+$/, '')
+  const root = trim(cwd)
+  const folder =
+    dir === ''
+      ? `${root}/.claude/handoffs`
+      : /^~([\\/]|$)/.test(dir) && home
+        ? trim(home) + dir.slice(1)
+        : /^([a-zA-Z]:)?[\\/]/.test(dir)
+          ? dir
+          : `${root}/${dir}`
+  const project = root.split(/[\\/]/).pop() || 'project'
+
+  return `${trim(folder)}/handoff-${project}-${stamp(now)}.md`
 }
 
 // The watched windows of a reading, a window whose reset has passed being stale.
@@ -215,7 +235,10 @@ async function pauseSession($: EngineInterface, trip: Trip) {
 
     const reply = await $.model.fork({ prompt: handoffPrompt(paused) })
     const doc = reply.isAnswered ? reply.text : transcriptHandoff(await $.session.messages().catch(() => []))
-    const handoffPath = `${await $.session.cwd()}/.claude/handoffs/handoff-${stamp(now)}.md`
+    const home = config.handoffDir.startsWith('~')
+      ? ((await $.env.get('USERPROFILE').catch(() => undefined)) ?? (await $.env.get('HOME').catch(() => undefined)))
+      : undefined
+    const handoffPath = handoffFile(config.handoffDir, await $.session.cwd(), home, now)
     await $.fs.write(handoffPath, doc)
 
     // `/savior off` or `resume` while the handoff was being written wins.

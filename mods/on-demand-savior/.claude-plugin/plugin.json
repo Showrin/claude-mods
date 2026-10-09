@@ -26,6 +26,12 @@
       "title": "On-demand budget (USD)",
       "description": "On-demand usage to let through once a limit is used up, then pause; 0 pauses at the thresholds instead",
       "default": 0
+    },
+    "handoffDir": {
+      "type": "string",
+      "title": "Handoff folder",
+      "description": "Folder to keep handoffs in: absolute, ~/..., or relative to the project; empty uses the project's .claude/handoffs",
+      "default": ""
     }
   }
 }

@@ -4,7 +4,7 @@ Stops Claude before your 5-hour or weekly limit spills into on-demand (extra) us
 
 1. **Watch**: every usage reading is checked against the 5-hour and weekly thresholds (96% by default), or the on-demand budget when one is set.
 2. **Pause**: the running turn is stopped, and new prompts and tool calls are held back.
-3. **Hand off**: the model writes a handoff (goal, done so far, in progress, next steps, key files, open questions) to `.claude/handoffs/handoff-<time>.md` in the project.
+3. **Hand off**: the model writes a handoff (goal, done so far, in progress, next steps, key files, open questions) to `handoff-<project>-<time>.md`, in the project's `.claude/handoffs` or the folder you choose. Handoffs are kept: each pause writes a new file, and nothing deletes one.
 4. **Resume**: a minute after the window resets, the handoff is sent back as a prompt and the work carries on.
 
 While it waits, the band right above the prompt shows `🛟 Paused at 5-hour 97% · resumes 3:31 PM` with a **Resume now** button (`r` once the band has focus) to go on now.
@@ -32,6 +32,7 @@ Set in `/config`:
 | `fiveHourThreshold` | `96` | Pause once the 5-hour limit reaches this percent used |
 | `weeklyThreshold` | `96` | Pause once the weekly limit reaches this percent used |
 | `onDemandBudgetUsd` | `0` | On-demand usage to let through once a limit is used up, then pause |
+| `handoffDir` | empty | Folder to keep handoffs in: absolute (`D:/notes/handoffs`), under your home (`~/handoffs`), or relative to the project (`docs/handoffs`). Empty uses the project's `.claude/handoffs` |
 
 With a budget above `0`, the thresholds step aside: the limit runs full, on-demand usage is counted from that moment (at API prices, as `/cost` counts it, within this session), and the pause comes once the budget is spent.
 

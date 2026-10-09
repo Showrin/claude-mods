@@ -1,21 +1,27 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { handoffPrompt, label, overBudget, resumePrompt, settings, spilled, stamp, transcriptHandoff, tripped } from './register'
+import { handoffFile, handoffPrompt, label, overBudget, resumePrompt, settings, spilled, stamp, transcriptHandoff, tripped } from './register'
 
 const NOW = Date.parse('2026-10-09T10:00:00Z')
 const RESET = '2026-10-09T12:00:00Z'
 const CWD = 'C:/proj'
-const HANDOFF = `${CWD}/.claude/handoffs/handoff-2026-10-09T10-00-00.md`
+const HANDOFF = `${CWD}/.claude/handoffs/handoff-proj-2026-10-09T10-00-00.md`
 const CONTEXT = { window: 200000 } as never
 
 test('helpers', () => {
   expect(label('five_hour')).toBe('5-hour')
   expect(label('seven_day')).toBe('weekly')
-  expect(settings({})).toEqual({ fiveHour: 96, weekly: 96, budgetUsd: 0 })
-  expect(settings({ fiveHourThreshold: '90', weeklyThreshold: 250, onDemandBudgetUsd: 5 })).toEqual({ fiveHour: 90, weekly: 96, budgetUsd: 5 })
+  expect(settings({})).toEqual({ fiveHour: 96, weekly: 96, budgetUsd: 0, handoffDir: '' })
+  expect(settings({ fiveHourThreshold: '90', weeklyThreshold: 250, onDemandBudgetUsd: 5 })).toEqual({ fiveHour: 90, weekly: 96, budgetUsd: 5, handoffDir: '' })
   expect(settings({ onDemandBudgetUsd: -1 }).budgetUsd).toBe(0)
   expect(stamp(NOW)).toBe('2026-10-09T10-00-00')
+  const file = (dir: string) => handoffFile(dir, String.raw`C:\work\app` + '\\', String.raw`C:\Users\me`, NOW)
+  expect(file('')).toBe(String.raw`C:\work\app/.claude/handoffs/handoff-app-2026-10-09T10-00-00.md`)
+  expect(file(String.raw`D:\notes\handoffs` + '\\')).toBe(String.raw`D:\notes\handoffs/handoff-app-2026-10-09T10-00-00.md`)
+  expect(file('~/handoffs')).toBe(String.raw`C:\Users\me/handoffs/handoff-app-2026-10-09T10-00-00.md`)
+  expect(file('docs/handoffs')).toBe(String.raw`C:\work\app/docs/handoffs/handoff-app-2026-10-09T10-00-00.md`)
+  expect(handoffFile('/var/h', '/home/me/app', undefined, NOW)).toBe('/var/h/handoff-app-2026-10-09T10-00-00.md')
 
   const week = { kind: 'seven_day', percentUsed: 97, resetsAt: '2026-10-12T00:00:00Z' }
   const hour = { kind: 'five_hour', percentUsed: 99, resetsAt: RESET }
@@ -56,6 +62,7 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
   const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0 }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on, store)
+  mock.env(on, { USERPROFILE: 'C:/Users/me' })
   on('ui.status', (_$, e) => {
     seen.status.push(e.text)
 
@@ -361,4 +368,19 @@ test('shows nothing under the prompt: clears an old status line, raises no toast
   await clock.settle()
   expect(seen.status).toEqual([undefined])
   expect(seen.toasts).toBe(0)
+})
+
+test('saves the handoff to the folder the setting names, and keeps it after resuming', { options: { handoffDir: 'D:/handoffs' } }, async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  const path = 'D:/handoffs/handoff-proj-2026-10-09T10-00-00.md'
+  expect(seen.files[path]).toBe('# Handoff\nGoal: ship it')
+
+  await $.command.run({ command: 'savior', args: 'resume' } as never)
+  await clock.settle()
+  expect(seen.submitted[0]).toContain(`saved this handoff to ${path}`)
+  // Resuming reads the handoff and leaves it where it is.
+  expect(seen.files[path]).toBe('# Handoff\nGoal: ship it')
 })

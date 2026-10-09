@@ -4,8 +4,8 @@ export type Trip = { kind: string; resetsAt: string; reason: string }
 /** A pause in one project: what tripped it and the handoff written for it. */
 export type Pause = Trip & { pausedAt: number; handoffPath?: string }
 
-/** The three settings: each window's threshold, and the on-demand budget (0: none). */
-export type Settings = { fiveHour: number; weekly: number; budgetUsd: number }
+/** The settings: each window's threshold, the on-demand budget (0: none) and the handoff folder ('' : the project's). */
+export type Settings = { fiveHour: number; weekly: number; budgetUsd: number; handoffDir: string }
 
 /** On-demand spend so far: the session's cost when a window first read full. */
 export type Spend = { resetsAt: string; startedAt: number; baseUsd: number }
