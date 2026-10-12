@@ -12,6 +12,11 @@
       "name": "cockpit",
       "source": "./mods/cockpit",
       "description": "Shows context, 5-hour and weekly limits, token usage and cost right above the prompt"
+    },
+    {
+      "name": "on-demand-savior",
+      "source": "./mods/on-demand-savior",
+      "description": "Pauses Claude before the 5-hour or weekly limit spills into on-demand usage, writes a handoff, and resumes from it once the limit resets"
     }
   ]
 }
