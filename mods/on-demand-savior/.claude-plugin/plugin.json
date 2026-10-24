@@ -1,0 +1,37 @@
+{
+  "name": "on-demand-savior",
+  "version": "0.1.0",
+  "description": "Pauses Claude before the 5-hour or weekly limit spills into on-demand usage, writes a handoff, and resumes from it once the limit resets",
+  "author": {
+    "name": "Showrin Barua",
+    "email": "showrinece15@gmail.com"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "fiveHourThreshold": {
+      "type": "number",
+      "title": "5-hour threshold (%)",
+      "description": "Pause once the 5-hour limit reaches this percent used",
+      "default": 96
+    },
+    "weeklyThreshold": {
+      "type": "number",
+      "title": "Weekly threshold (%)",
+      "description": "Pause once the weekly limit reaches this percent used",
+      "default": 96
+    },
+    "onDemandBudgetUsd": {
+      "type": "number",
+      "title": "On-demand budget (USD)",
+      "description": "On-demand usage to let through once a limit is used up, then pause; 0 pauses at the thresholds instead",
+      "default": 0
+    },
+    "handoffDir": {
+      "type": "string",
+      "title": "Handoff folder",
+      "description": "Folder to keep handoffs in: absolute, ~/..., or relative to the project; empty uses the project's .claude/handoffs",
+      "default": ""
+    }
+  }
+}
