@@ -10,6 +10,7 @@ const costUsd = atom({ plugin: 'cockpit', key: 'costUsd' } as const, null)
 const minute = atom({ plugin: 'cockpit', key: 'minute' } as const, 0)
 const tokens = atom({ plugin: 'cockpit', key: 'tokens' } as const, null)
 const context = atom({ plugin: 'cockpit', key: 'context' } as const, null)
+const branch = atom({ plugin: 'cockpit', key: 'branch' } as const, null)
 
 const LABELS: Record<string, string> = {
   five_hour: '5h',
@@ -171,6 +172,45 @@ const countTranscript = async ($: EngineInterface, cwd: string): Promise<Counts 
   }
 }
 
+// The session's branch, the short sha when detached, null outside a repo.
+const currentBranch = async ($: EngineInterface) => {
+  try {
+    const cwd = await $.session.cwd()
+    const git = (...args: string[]) => $.process.run(['git', ...args], { cwd, timeoutMs: 5000 })
+    const name = await git('branch', '--show-current')
+    if (name.exitCode !== 0) {
+      return null
+    }
+    if (name.stdout.trim()) {
+      return name.stdout.trim()
+    }
+    const sha = await git('rev-parse', '--short', 'HEAD')
+
+    return sha.exitCode === 0 && sha.stdout.trim() ? sha.stdout.trim() : null
+  } catch {
+    return null
+  }
+}
+
+const refreshBranch = async ($: EngineInterface) => {
+  const name = await currentBranch($)
+  await update($, branch, () => name)
+}
+
+// Which sections the band draws; each on unless its setting is off.
+export const shown = (options: Record<string, unknown>) => {
+  const on = (key: string) => options[key] !== false
+
+  return {
+    branch: on('showBranch'),
+    context: on('showContext'),
+    limits: on('showLimits'),
+    breakdown: on('showTokenBreakdown'),
+    tokens: on('showTokens'),
+    cost: on('showCost'),
+  }
+}
+
 const sorted = (list: readonly Limit[]) =>
   [...list].sort((a, b) => {
     const ia = ORDER.indexOf(a.kind)
@@ -181,6 +221,7 @@ const sorted = (list: readonly Limit[]) =>
 
 export const register: Register = (on, options) => {
   const timeZone = zone(options.timezone)
+  const show = shown(options)
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -189,6 +230,9 @@ export const register: Register = (on, options) => {
     await update($, costUsd, () => usage.cost?.usd ?? null)
     const measured = await measureContext($)
     await update($, context, () => measured)
+    if (show.branch) {
+      await refreshBranch($)
+    }
     // A reload keeps the running totals; a new session (or /clear) counts its
     // transcript once, then each turn adds to that.
     const current = await read($, tokens)
@@ -242,12 +286,25 @@ export const register: Register = (on, options) => {
         }
       })
     }
+    if (show.branch) {
+      await refreshBranch($)
+    }
 
     return next(e)
   })
 
+  // A git switch or checkout moves the branch mid-turn.
+  if (show.branch) {
+    on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+      const result = await next(e)
+      refreshBranch($).catch(() => {})
+
+      return result
+    })
+  }
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) {
+    if (e.props.hasSurvey || !Object.values(show).some(Boolean)) {
       return next(e)
     }
 
@@ -255,13 +312,14 @@ export const register: Register = (on, options) => {
     const cost = await read($, costUsd)
     const used = await read($, tokens)
     const ctx = await read($, context)
+    const branchName = await read($, branch)
     await read($, minute)
     const now = await $.clock.now()
     const { Box, Text } = $.ui.resolve(e)
 
     const total = used ? used.read + used.write + used.cacheRead + used.cacheWrite : 0
 
-    if (list.length === 0 && cost === null && total === 0 && ctx === null) {
+    if (list.length === 0 && cost === null && total === 0 && ctx === null && branchName === null) {
       return (
         <Box>
           <Text dimColor>Usage: waiting for the first reply to report limits…</Text>
@@ -276,7 +334,7 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const sections = list.map(l => {
+    const sections = (show.limits ? list : []).map(l => {
       const left = Math.max(0, 100 - Math.round(l.percentUsed))
       const name = label(l.kind)
       const tone = color(l.percentUsed)
@@ -305,7 +363,7 @@ export const register: Register = (on, options) => {
       )
     })
 
-    if (used !== null) {
+    if (used !== null && show.breakdown) {
       // "Read/Write 8/3.2k" over "Cache R/W 3k/5k", the pairs right-aligned.
       const [io, cache] = pad(
         `${count(used.read)}/${count(used.write)}`,
@@ -326,33 +384,45 @@ export const register: Register = (on, options) => {
       )
     }
 
-    if (used !== null || cost !== null) {
-      // Pad both rows to one width so the numbers line up on the right.
-      const [tokensText, costText] = pad(count(total), cost === null ? '—' : usd(cost))
+    if ((used !== null || cost !== null) && (show.tokens || show.cost)) {
+      // Pad the shown rows to one width so the numbers line up on the right.
+      const rows = [
+        ...(show.tokens ? [{ key: 'tokens', name: 'Tokens ', value: count(total) }] : []),
+        ...(show.cost ? [{ key: 'cost', name: 'Cost   ', value: cost === null ? '—' : usd(cost) }] : []),
+      ]
+      const values = pad(...rows.map(r => r.value))
 
       sections.push(
         <Box key="totals" flexDirection="column">
-          <Box key="tokens">
-            <Text dimColor>Tokens </Text>
-            <Text bold>{tokensText}</Text>
-          </Box>
-          <Box key="cost">
-            <Text dimColor>Cost   </Text>
-            <Text bold>{costText}</Text>
-          </Box>
+          {rows.map((r, i) => (
+            <Box key={r.key}>
+              <Text dimColor>{r.name}</Text>
+              <Text bold>{values[i]}</Text>
+            </Box>
+          ))}
         </Box>,
       )
     }
 
-    const usageRow = (
-      <Box key="usage" flexDirection="row" flexWrap="wrap">
-        {sections.flatMap((section, i) => (i === 0 ? [section] : [divider(`divider-${i}`), section]))}
-      </Box>
-    )
+    const usageRow =
+      sections.length === 0 ? null : (
+        <Box key="usage" flexDirection="row" flexWrap="wrap">
+          {sections.flatMap((section, i) => (i === 0 ? [section] : [divider(`divider-${i}`), section]))}
+        </Box>
+      )
 
-    // One bordered box: the context window on top, a rule, then the usage sections.
+    const branchRow =
+      branchName === null || !show.branch ? null : (
+        <Box key="branch">
+          <Text dimColor>Branch </Text>
+          <Text color={BORDER}>⎇ </Text>
+          <Text bold>{branchName}</Text>
+        </Box>
+      )
+
+    // One bordered box: the branch and context window on top, a rule, then the usage sections.
     const contextRow = (() => {
-      if (ctx === null) {
+      if (ctx === null || !show.context) {
         return null
       }
       const percent = ctx.percent ?? (ctx.tokens === undefined ? undefined : (ctx.tokens / ctx.window) * 100)
@@ -391,10 +461,17 @@ export const register: Register = (on, options) => {
     // The band's width less the border and padding on each side.
     const ruleWidth = Math.max(1, e.props.bodyColumns - 4)
 
+    if (branchRow === null && contextRow === null && usageRow === null) {
+      return next(e)
+    }
+
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={BORDER} paddingX={1}>
+        {branchRow}
         {contextRow}
-        {contextRow === null ? null : <Text color={BORDER}>{'─'.repeat(ruleWidth)}</Text>}
+        {(branchRow === null && contextRow === null) || usageRow === null ? null : (
+          <Text color={BORDER}>{'─'.repeat(ruleWidth)}</Text>
+        )}
         {usageRow}
       </Box>
     )

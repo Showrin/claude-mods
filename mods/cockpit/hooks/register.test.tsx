@@ -66,7 +66,12 @@ const CONTEXT = {
   },
 } as never
 
-const engine = (on: On) => {
+type Git = { exitCode: number; stdout: string }
+const NO_REPO: Git = { exitCode: 128, stdout: '' }
+
+const engine = (on: On, git: Git | ((argv: readonly string[]) => Git) = NO_REPO) => {
+  on('session.cwd', () => ({ value: '/' }))
+  on('process.run', (_$, e) => ({ value: { stderr: '', ...(typeof git === 'function' ? git(e.argv) : git) } }))
   on('clock.now', () => ({ value: Date.parse('2026-10-07T10:00:00Z') }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('session.usage', () => ({ value: { startedAt: 1, context: CONTEXT, rateLimits: [] } }))
@@ -129,6 +134,79 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ key: 'cache' }))?.text).toBe('Cache R/W  9k/500')
     expect((await ui.find({ key: 'tokens' }))?.text).toBe('Tokens 11k')
   })
+
+  test(`band shows the branch on ${surface}`, async ($, on) => {
+    engine(on, { exitCode: 0, stdout: 'feature/x\n' })
+    await $.session.start({ cwd: '/', surface, isInteractive: true })
+
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
+    expect((await ui.find({ key: 'branch' }))?.text).toBe('Branch ⎇ feature/x')
+  })
+
+  test(`band shows the short sha when detached on ${surface}`, async ($, on) => {
+    engine(on, argv => ({ exitCode: 0, stdout: argv.includes('rev-parse') ? 'abc1234\n' : '' }))
+    await $.session.start({ cwd: '/', surface, isInteractive: true })
+
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
+    expect((await ui.find({ key: 'branch' }))?.text).toBe('Branch ⎇ abc1234')
+  })
+
+  test(`band hides the branch outside a repo on ${surface}`, async ($, on) => {
+    engine(on)
+    await $.session.start({ cwd: '/', surface, isInteractive: true })
+
+    const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
+    expect(await ui.find({ key: 'context' })).toBeDefined()
+    expect(await ui.find({ key: 'branch' })).toBeUndefined()
+  })
+
+  const measured = {
+    context: { window: 200000, tokens: 90000, percent: 45 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 62.4, resetsAt: '2026-10-07T12:30:00Z' }],
+    cost: { usd: 4.567 },
+    changed: ['rateLimits', 'cost', 'context'],
+  } as const
+
+  test(
+    `band hides sections turned off on ${surface}`,
+    { options: { showLimits: false, showCost: false, showBranch: false } },
+    async ($, on) => {
+      engine(on, { exitCode: 0, stdout: 'feature/x\n' })
+      await $.session.start({ cwd: '/', surface, isInteractive: true })
+      await $.session.measure(measured)
+
+      const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
+      expect(await ui.find({ key: 'five_hour' })).toBeUndefined()
+      expect(await ui.find({ key: 'cost' })).toBeUndefined()
+      expect(await ui.find({ key: 'branch' })).toBeUndefined()
+      expect((await ui.find({ key: 'tokens' }))?.text).toBe('Tokens 0')
+      expect(await ui.find({ key: 'context' })).toBeDefined()
+    },
+  )
+
+  test(
+    `band draws nothing with every section off on ${surface}`,
+    {
+      options: {
+        showBranch: false,
+        showContext: false,
+        showLimits: false,
+        showTokenBreakdown: false,
+        showTokens: false,
+        showCost: false,
+      },
+    },
+    async ($, on) => {
+      engine(on, { exitCode: 0, stdout: 'feature/x\n' })
+      await $.session.start({ cwd: '/', surface, isInteractive: true })
+      await $.session.measure(measured)
+
+      const ui = await $.ui.mount({ plugin: 'cockpit', surface, component: 'AbovePrompt', props: PROPS })
+      expect(await ui.find({ key: 'context' })).toBeUndefined()
+      expect(await ui.find({ key: 'tokens' })).toBeUndefined()
+      expect(await ui.find({ text: /waiting for the first reply/ })).toBeUndefined()
+    },
+  )
 
   test(`band waits before any reading on ${surface}`, async ($, on) => {
     engine(on)

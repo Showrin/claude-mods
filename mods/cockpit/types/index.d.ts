@@ -23,7 +23,7 @@ declare module 'claude-code' {
   interface PluginState {
     'cockpit': {
       limits: Limit[]; costUsd: number | null; minute: number; tokens: Tokens | null
-      context: Context | null
+      context: Context | null; branch: string | null
     }
   }
 }

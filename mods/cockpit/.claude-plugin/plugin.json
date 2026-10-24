@@ -1,7 +1,7 @@
 {
   "name": "cockpit",
   "version": "0.1.0",
-  "description": "Shows context, 5-hour and weekly limits, token usage and cost right above the prompt",
+  "description": "Shows the git branch, context, 5-hour and weekly limits, token usage and cost right above the prompt",
   "author": {
     "name": "Showrin Barua",
     "email": "showrinece15@gmail.com"
@@ -14,6 +14,42 @@
       "title": "Timezone",
       "description": "IANA timezone for reset times, e.g. Asia/Dhaka or America/New_York; 'system' uses this computer's timezone",
       "default": "system"
+    },
+    "showBranch": {
+      "type": "boolean",
+      "title": "Show branch",
+      "description": "Show the git branch the session works on",
+      "default": true
+    },
+    "showContext": {
+      "type": "boolean",
+      "title": "Show context",
+      "description": "Show how full the context window is and what fills it",
+      "default": true
+    },
+    "showLimits": {
+      "type": "boolean",
+      "title": "Show limits",
+      "description": "Show the 5-hour, weekly and on-demand limits",
+      "default": true
+    },
+    "showTokenBreakdown": {
+      "type": "boolean",
+      "title": "Show token breakdown",
+      "description": "Show Read/Write and Cache R/W tokens",
+      "default": true
+    },
+    "showTokens": {
+      "type": "boolean",
+      "title": "Show tokens",
+      "description": "Show the total tokens",
+      "default": true
+    },
+    "showCost": {
+      "type": "boolean",
+      "title": "Show cost",
+      "description": "Show the session's cost",
+      "default": true
     }
   }
 }
