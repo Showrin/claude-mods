@@ -189,7 +189,7 @@ function stopPoll() {
 }
 
 // A resume before the reset ('early', the person's choice) also quiets the
-// checks until that window resets: its readings stay past the threshold.
+// checks on that window until it resets: its readings stay past the threshold.
 async function resume($: EngineInterface, isEarly = false) {
   const pause = await getPause($)
   stopPoll()
@@ -239,13 +239,14 @@ async function pauseSession($: EngineInterface, trip: Trip) {
       ? ((await $.env.get('USERPROFILE').catch(() => undefined)) ?? (await $.env.get('HOME').catch(() => undefined)))
       : undefined
     const handoffPath = handoffFile(config.handoffDir, await $.session.cwd(), home, now)
-    await $.fs.write(handoffPath, doc)
+    // A failed write still keeps the pause, so it still ends at the reset.
+    const isSaved = await $.fs.write(handoffPath, doc).then(() => true, () => false)
 
     // `/savior off` or `resume` while the handoff was being written wins.
     if (!(await getPause($))) {
       return
     }
-    await savePause($, { ...paused, handoffPath })
+    await savePause($, isSaved ? { ...paused, handoffPath } : paused)
     arm($)
     await showHandoff($, doc)
   } finally {
@@ -253,8 +254,8 @@ async function pauseSession($: EngineInterface, trip: Trip) {
   }
 }
 
-// With a budget, the windows run full and on into on-demand usage, counted
-// from the session's cost when one first read full until the budget is spent.
+// With a budget, the windows run full and on into on-demand usage, counted per
+// session from its cost when one first read full until every full window reset.
 async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined, now: number) {
   const full = spilled(limits, now)
   if (!full || costUsd === undefined) {
@@ -262,14 +263,16 @@ async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[]
   }
   const { startedAt } = await $.session.usage()
   const spendKey = `spend:${await $.session.cwd()}`
-  const spend = (await $.store.get(spendKey)) as Spend | undefined
-  if (!spend || spend.resetsAt !== full.resetsAt || spend.startedAt !== startedAt) {
-    await $.store.set(spendKey, { resetsAt: full.resetsAt!, startedAt, baseUsd: costUsd })
-
-    return undefined
+  const stored = await $.store.get(spendKey)
+  const spends = (Array.isArray(stored) ? stored : []) as Spend[]
+  const others = spends.filter(s => s.startedAt !== startedAt && Date.parse(s.resetsAt) > now)
+  const mine = spends.find(s => s.startedAt === startedAt && Date.parse(s.resetsAt) > now)
+  const resetsAt = mine && Date.parse(mine.resetsAt) > Date.parse(full.resetsAt!) ? mine.resetsAt : full.resetsAt!
+  if (!mine || mine.resetsAt !== resetsAt) {
+    await $.store.set(spendKey, [...others, { resetsAt, startedAt, baseUsd: mine?.baseUsd ?? costUsd }])
   }
 
-  return overBudget(full, spend, costUsd, config.budgetUsd)
+  return mine && overBudget(full, mine, costUsd, config.budgetUsd)
 }
 
 async function check($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined) {
@@ -277,10 +280,10 @@ async function check($: EngineInterface, limits: readonly SessionRateLimit[], co
     return
   }
   const now = await $.clock.now()
-  if (now < (await quietUntil($))) {
-    return
-  }
-  const hit = config.budgetUsd > 0 ? await spentTrip($, limits, costUsd, now) : tripped(limits, config, now)
+  // An early resume quiets only the windows it pushed past: those resetting before the quiet ends.
+  const quiet = await quietUntil($)
+  const watched = limits.filter(l => !l.resetsAt || Date.parse(l.resetsAt) >= quiet)
+  const hit = config.budgetUsd > 0 ? await spentTrip($, watched, costUsd, now) : tripped(watched, config, now)
   if (hit) {
     // Off this dispatch: the pause aborts the turn and waits on the model.
     $.clock.after(0, () => void pauseSession($, hit))
@@ -301,7 +304,7 @@ async function status($: EngineInterface) {
   const now = await $.clock.now()
   const quiet = await quietUntil($)
   if (now < quiet) {
-    return `on-demand-savior is on, but resumed early: limit checks are off until ${clockTime(quiet, now)}, when the window resets. /savior on to check again now.`
+    return `on-demand-savior is on, but resumed early: the paused limit's checks are off until ${clockTime(quiet, now)}, when it resets. /savior on to check again now.`
   }
   const { fiveHour, weekly, budgetUsd } = config
 
@@ -357,7 +360,7 @@ export const register: Register = (on, options) => {
       }
       await resume($, true)
 
-      return { text: 'on-demand-savior: resumed from the handoff before the reset; limit checks are off until it, so this may use on-demand usage.' }
+      return { text: 'on-demand-savior: resumed from the handoff before the reset; checks on that limit are off until it, so this may use on-demand usage.' }
     } else if (action === 'handoff') {
       const pause = await getPause($)
       const doc = pause?.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined

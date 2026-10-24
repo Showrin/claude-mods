@@ -59,7 +59,7 @@ const slashes = (path: string) => path.replace(/\\/g, '/')
 
 // The engine beneath the mod: what it was asked to abort, write and submit.
 const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, costUsd = 0) => {
-  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0 }
+  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0, startedAt: 1, isWriteFailing: false }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on, store)
   mock.env(on, { USERPROFILE: 'C:/Users/me' })
@@ -75,7 +75,7 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
-  on('session.usage', () => ({ value: { startedAt: 1, context: CONTEXT, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], cost: { usd: costUsd } } }))
+  on('session.usage', () => ({ value: { startedAt: seen.startedAt, context: CONTEXT, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], cost: { usd: costUsd } } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
@@ -91,6 +91,9 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
     return { value: { isAnswered: true, text: '# Handoff\nGoal: ship it', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
   })
   on('fs.write', (_$, e) => {
+    if (seen.isWriteFailing) {
+      return { deny: 'disk full' }
+    }
     seen.files[slashes(e.path)] = e.text
 
     return { value: undefined }
@@ -334,7 +337,7 @@ test('an early resume stops the checks until that window resets', async ($, on) 
   }
   expect(seen.forks).toBe(1)
   expect((await $.prompt.submit(typed('go on'))).drop).toBeUndefined()
-  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('limit checks are off until')
+  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('checks are off until')
 
   // Once the window resets, a new one is guarded again.
   await clock.set(Date.parse(RESET) + 90_000)
@@ -383,4 +386,54 @@ test('saves the handoff to the folder the setting names, and keeps it after resu
   expect(seen.submitted[0]).toContain(`saved this handoff to ${path}`)
   // Resuming reads the handoff and leaves it where it is.
   expect(seen.files[path]).toBe('# Handoff\nGoal: ship it')
+})
+
+const WEEK = '2026-10-12T00:00:00Z'
+const both = (hour: number, week: number, usd?: number) => ({
+  ...measure(hour, usd),
+  rateLimits: [{ kind: 'five_hour', percentUsed: hour, resetsAt: RESET }, { kind: 'seven_day', percentUsed: week, resetsAt: WEEK }],
+})
+
+test('an early resume from a 5-hour pause still guards the weekly', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(both(97, 80))
+  await clock.settle()
+  await $.command.run({ command: 'savior', args: 'resume' } as never)
+  await clock.settle()
+  await $.session.measure(both(98, 97))
+  await clock.settle()
+  expect(seen.forks).toBe(2)
+})
+
+test('with a budget, the count goes on when the weekly runs full too', { options: { onDemandBudgetUsd: 2 } }, async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(100, 10))
+  await $.session.measure(both(100, 100, 11))
+  await $.session.measure(both(100, 100, 12.5))
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+})
+
+test('with a budget, another session in the project keeps its own count', { options: { onDemandBudgetUsd: 2 } }, async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  for (const [session, usd] of [[1, 10], [2, 0], [1, 11], [2, 1], [1, 12.5]]) {
+    seen.startedAt = session
+    await $.session.measure(measure(100, usd))
+  }
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+})
+
+test('a failed handoff write still resumes after the reset', async ($, on) => {
+  const { seen, clock } = engine(on)
+  seen.isWriteFailing = true
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+  await clock.set(Date.parse(RESET) + 90_000)
+  expect(seen.submitted).toHaveLength(1)
 })

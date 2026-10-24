@@ -7,7 +7,7 @@ export type Pause = Trip & { pausedAt: number; handoffPath?: string }
 /** The settings: each window's threshold, the on-demand budget (0: none) and the handoff folder ('' : the project's). */
 export type Settings = { fiveHour: number; weekly: number; budgetUsd: number; handoffDir: string }
 
-/** On-demand spend so far: the session's cost when a window first read full. */
+/** One session's on-demand spend: its cost when a window first read full, kept until the last full window resets. */
 export type Spend = { resetsAt: string; startedAt: number; baseUsd: number }
 
 declare module 'claude-code' {
