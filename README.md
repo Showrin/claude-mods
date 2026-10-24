@@ -9,6 +9,7 @@ Each mod lives in its own folder under `mods/`, and the repo is also a plugin ma
 | --- | --- |
 | [cockpit](mods/cockpit) | A bordered band above the prompt: context fill and what takes it, 5-hour and weekly limits with reset times, token usage and cost. |
 | [on-demand-savior](mods/on-demand-savior) | Pauses Claude at 96% of the 5-hour or weekly limit, writes a handoff, and resumes from it once the limit resets. `/savior off` turns it off. |
+| [turn-memo](mods/turn-memo) | A one-line memo beneath every reply: tokens, read/write, cache read/write and running cost. |
 
 ![cockpit](mods/cockpit/screenshot.png)
 

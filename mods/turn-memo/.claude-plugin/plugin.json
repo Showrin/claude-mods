@@ -1,0 +1,11 @@
+{
+  "name": "turn-memo",
+  "version": "0.1.0",
+  "description": "Prints a one-line memo (tokens, cache, cost) beneath every reply",
+  "author": {
+    "name": "Showrin Barua",
+    "email": "showrinece15@gmail.com"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
