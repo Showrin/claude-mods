@@ -1,6 +1,6 @@
 {
   "name": "on-demand-savior",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pauses Claude before the 5-hour or weekly limit spills into on-demand usage, writes a handoff, and resumes from it once the limit resets",
   "author": {
     "name": "Showrin Barua",
