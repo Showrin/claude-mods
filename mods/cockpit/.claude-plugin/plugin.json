@@ -1,6 +1,6 @@
 {
   "name": "cockpit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shows the git branch, context, 5-hour and weekly limits, token usage and cost right above the prompt",
   "author": {
     "name": "Showrin Barua",
