@@ -1,7 +1,7 @@
-import type { On } from 'claude-code'
+import type { ConfigRow, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { handoffFile, handoffPrompt, label, overBudget, resumePrompt, settings, spilled, stamp, transcriptHandoff, tripped } from './register'
+import { handoffFile, handoffPrompt, label, liveOptions, overBudget, resumePrompt, settings, spilled, stamp, transcriptHandoff, tripped } from './register'
 
 const NOW = Date.parse('2026-10-09T10:00:00Z')
 const RESET = '2026-10-09T12:00:00Z'
@@ -54,13 +54,38 @@ test('helpers', () => {
   expect(tail).toContain('**user**: fix the bug')
 })
 
+const row = (key: string, value: ConfigRow['value']): ConfigRow => ({
+  key,
+  label: key,
+  kind: typeof value === 'number' ? 'number' : 'text',
+  value,
+  provider: { plugin: 'on-demand-savior', tier: 'user' },
+  isLocked: false,
+})
+
+test('live options', () => {
+  const loaded = { fiveHourThreshold: 96, weeklyThreshold: 90 }
+  const rows = [
+    row('on-demand-savior.fiveHourThreshold', 48),
+    row('cockpit.fiveHourThreshold', 10),
+    row('on-demand-savior@claude-mods.weeklyThreshold', 20),
+    row('on-demand-savior.handoffDir', 'docs/handoffs'),
+  ]
+  expect(liveOptions(rows, 'on-demand-savior', loaded)).toEqual({ fiveHourThreshold: 48, weeklyThreshold: 90, handoffDir: 'docs/handoffs' })
+  expect(liveOptions([], 'on-demand-savior', loaded)).toEqual(loaded)
+})
+
 // The engine hands paths on in the platform's own spelling.
 const slashes = (path: string) => path.replace(/\\/g, '/')
 
 // The engine beneath the mod: what it was asked to abort, write and submit.
 const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, costUsd = 0) => {
-  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0, startedAt: 1, isWriteFailing: false }
+  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0, startedAt: 1, isWriteFailing: false, isListFailing: false }
   const clock = mock.clock(on, { now: NOW })
+  // The /config rows as they stand; a test changes them as a save in /config would.
+  const rows: ConfigRow[] = []
+  // config.list is an op, not a typed hook event, hence the casts.
+  on('config.list' as never, (() => (seen.isListFailing ? { deny: 'refused' } : { value: rows })) as never)
   mock.store(on, store)
   mock.env(on, { USERPROFILE: 'C:/Users/me' })
   on('ui.status', (_$, e) => {
@@ -129,7 +154,7 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
     )
   })
 
-  return { seen, clock }
+  return { seen, clock, rows }
 }
 
 // A prompt as the person types it.
@@ -436,4 +461,51 @@ test('a failed handoff write still resumes after the reset', async ($, on) => {
   expect(seen.forks).toBe(1)
   await clock.set(Date.parse(RESET) + 90_000)
   expect(seen.submitted).toHaveLength(1)
+})
+
+test('a threshold changed in /config counts at once, with no reload', async ($, on) => {
+  const { seen, clock, rows } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('5-hour 96%')
+
+  rows.push(row('on-demand-savior.fiveHourThreshold', 48))
+  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('5-hour 48% or weekly 96%')
+  await $.session.measure(measure(47))
+  await clock.settle()
+  expect(seen.forks).toBe(0)
+  await $.session.measure(measure(50))
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+})
+
+test('falls back to the options it loaded with when /config cannot be read', { options: { fiveHourThreshold: 60 } }, async ($, on) => {
+  const { seen, clock, rows } = engine(on)
+  // A refused read keeps the loaded options, never a row it could not read.
+  rows.push(row('on-demand-savior.fiveHourThreshold', 30))
+  seen.isListFailing = true
+  await $.session.start({ cwd: CWD } as never)
+  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('5-hour 60%')
+  // Past the refused row's 30, short of the loaded 60: no pause.
+  await $.session.measure(measure(50))
+  await clock.settle()
+  expect(seen.forks).toBe(0)
+  await $.session.measure(measure(61))
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+})
+
+test('a budget set in /config switches to counting on-demand usage at once', async ($, on) => {
+  const { rows } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  rows.push(row('on-demand-savior.onDemandBudgetUsd', 3))
+  expect((await $.command.run({ command: 'savior', args: '' } as never)).text).toContain('lets $3.00 of on-demand usage through')
+})
+
+test('a handoff folder changed in /config is where the next handoff goes', async ($, on) => {
+  const { seen, clock, rows } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  rows.push(row('on-demand-savior.handoffDir', 'D:/handoffs'))
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.files['D:/handoffs/handoff-proj-2026-10-09T10-00-00.md']).toBe('# Handoff\nGoal: ship it')
 })

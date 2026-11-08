@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
+import type { ConfigRow, EngineInterface, Register, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
 
 import type { Pause, Settings, Spend, Trip } from '../types'
 
@@ -35,6 +35,23 @@ export const settings = (options: Record<string, unknown>): Settings => {
     budgetUsd: Number.isFinite(budget) && budget > 0 ? budget : 0,
     handoffDir: typeof options.handoffDir === 'string' ? options.handoffDir.trim() : '',
   }
+}
+
+const FIELDS = ['fiveHourThreshold', 'weeklyThreshold', 'onDemandBudgetUsd', 'handoffDir'] as const
+
+// The plugin's /config rows laid over the options it loaded with. A row keyed by
+// plugin id (two copies of the same name loaded) is not ours to read, so it is left out;
+// a missing row (one a config.describe hook hid) keeps the loaded value.
+export const liveOptions = (rows: readonly ConfigRow[], name: string, options: Record<string, unknown>) => {
+  const live = { ...options }
+  for (const field of FIELDS) {
+    const row = rows.find(r => r.key === `${name}.${field}`)
+    if (row) {
+      live[field] = row.value
+    }
+  }
+
+  return live
 }
 
 // Where a handoff is saved: the setting's folder (`~` the home folder, a relative
@@ -125,10 +142,17 @@ const pausedLine = (pause: Pause, now: number) =>
   `🛟 Paused at ${pause.reason} · resumes ${clockTime(resumesAt(pause), now)}`
 
 // Module variables: a reload starts them over, the store keeps the pause itself.
-let config = settings({})
+let loaded: Record<string, unknown> = {}
 let turnId: string | undefined
 let poll: Timer | undefined
 let isPausing = false
+
+// The settings as /config holds them now: a save there does not always reload the plugin.
+async function current($: EngineInterface) {
+  const rows = await $.config.list().catch(() => [] as ConfigRow[])
+
+  return settings(liveOptions(rows, $.plugin.name, loaded))
+}
 
 // One pause per project, so a session elsewhere neither resumes nor clears it.
 async function key($: EngineInterface) {
@@ -235,10 +259,11 @@ async function pauseSession($: EngineInterface, trip: Trip) {
 
     const reply = await $.model.fork({ prompt: handoffPrompt(paused) })
     const doc = reply.isAnswered ? reply.text : transcriptHandoff(await $.session.messages().catch(() => []))
-    const home = config.handoffDir.startsWith('~')
+    const { handoffDir } = await current($)
+    const home = handoffDir.startsWith('~')
       ? ((await $.env.get('USERPROFILE').catch(() => undefined)) ?? (await $.env.get('HOME').catch(() => undefined)))
       : undefined
-    const handoffPath = handoffFile(config.handoffDir, await $.session.cwd(), home, now)
+    const handoffPath = handoffFile(handoffDir, await $.session.cwd(), home, now)
     // A failed write still keeps the pause, so it still ends at the reset.
     const isSaved = await $.fs.write(handoffPath, doc).then(() => true, () => false)
 
@@ -256,7 +281,7 @@ async function pauseSession($: EngineInterface, trip: Trip) {
 
 // With a budget, the windows run full and on into on-demand usage, counted per
 // session from its cost when one first read full until every full window reset.
-async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined, now: number) {
+async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined, now: number, budgetUsd: number) {
   const full = spilled(limits, now)
   if (!full || costUsd === undefined) {
     return undefined
@@ -272,7 +297,7 @@ async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[]
     await $.store.set(spendKey, [...others, { resetsAt, startedAt, baseUsd: mine?.baseUsd ?? costUsd }])
   }
 
-  return mine && overBudget(full, mine, costUsd, config.budgetUsd)
+  return mine && overBudget(full, mine, costUsd, budgetUsd)
 }
 
 async function check($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined) {
@@ -283,7 +308,8 @@ async function check($: EngineInterface, limits: readonly SessionRateLimit[], co
   // An early resume quiets only the windows it pushed past: those resetting before the quiet ends.
   const quiet = await quietUntil($)
   const watched = limits.filter(l => !l.resetsAt || Date.parse(l.resetsAt) >= quiet)
-  const hit = config.budgetUsd > 0 ? await spentTrip($, watched, costUsd, now) : tripped(watched, config, now)
+  const s = await current($)
+  const hit = s.budgetUsd > 0 ? await spentTrip($, watched, costUsd, now, s.budgetUsd) : tripped(watched, s, now)
   if (hit) {
     // Off this dispatch: the pause aborts the turn and waits on the model.
     $.clock.after(0, () => void pauseSession($, hit))
@@ -306,7 +332,7 @@ async function status($: EngineInterface) {
   if (now < quiet) {
     return `on-demand-savior is on, but resumed early: the paused limit's checks are off until ${clockTime(quiet, now)}, when it resets. /savior on to check again now.`
   }
-  const { fiveHour, weekly, budgetUsd } = config
+  const { fiveHour, weekly, budgetUsd } = await current($)
 
   return budgetUsd > 0
     ? `on-demand-savior is on: lets ${usd(budgetUsd)} of on-demand usage through once a limit is used up, then pauses.`
@@ -314,7 +340,7 @@ async function status($: EngineInterface) {
 }
 
 export const register: Register = (on, options) => {
-  config = settings(options)
+  loaded = options
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)

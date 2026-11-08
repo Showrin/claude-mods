@@ -1,6 +1,6 @@
 {
   "name": "on-demand-savior",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Pauses Claude before the 5-hour or weekly limit spills into on-demand usage, writes a handoff, and resumes from it once the limit resets",
   "author": {
     "name": "Showrin Barua",
@@ -12,19 +12,19 @@
     "fiveHourThreshold": {
       "type": "number",
       "title": "5-hour threshold (%)",
-      "description": "Pause once the 5-hour limit reaches this percent used",
+      "description": "Pause once the 5-hour limit reaches this percent used; to reset, type 0 (uses 96), as an empty field is not saved",
       "default": 96
     },
     "weeklyThreshold": {
       "type": "number",
       "title": "Weekly threshold (%)",
-      "description": "Pause once the weekly limit reaches this percent used",
+      "description": "Pause once the weekly limit reaches this percent used; to reset, type 0 (uses 96), as an empty field is not saved",
       "default": 96
     },
     "onDemandBudgetUsd": {
       "type": "number",
       "title": "On-demand budget (USD)",
-      "description": "On-demand usage to let through once a limit is used up, then pause; 0 pauses at the thresholds instead",
+      "description": "On-demand usage to let through once a limit is used up, then pause; 0 pauses at the thresholds instead (type 0 to clear it, as an empty field is not saved)",
       "default": 0
     },
     "handoffDir": {
