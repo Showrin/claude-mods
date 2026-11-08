@@ -80,7 +80,7 @@ const slashes = (path: string) => path.replace(/\\/g, '/')
 
 // The engine beneath the mod: what it was asked to abort, write and submit.
 const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, costUsd = 0) => {
-  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0, startedAt: 1, isWriteFailing: false, isListFailing: false }
+  const seen = { aborted: [] as string[], files: {} as Record<string, string>, submitted: [] as string[], forks: 0, opened: [] as string[], closed: [] as string[], status: [] as (string | undefined)[], toasts: 0, startedAt: 1, isWriteFailing: false, isListFailing: false, sessionId: 's1' }
   const clock = mock.clock(on, { now: NOW })
   // The /config rows as they stand; a test changes them as a save in /config would.
   const rows: ConfigRow[] = []
@@ -100,6 +100,7 @@ const engine = (on: On, store: Record<string, unknown> = {}, percentUsed = 97, c
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
+  on('session.id', () => ({ value: seen.sessionId }))
   on('session.usage', () => ({ value: { startedAt: seen.startedAt, context: CONTEXT, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], cost: { usd: costUsd } } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
@@ -508,4 +509,171 @@ test('a handoff folder changed in /config is where the next handoff goes', async
   await $.session.measure(measure(97))
   await clock.settle()
   expect(seen.files['D:/handoffs/handoff-proj-2026-10-09T10-00-00.md']).toBe('# Handoff\nGoal: ship it')
+})
+
+const savior = (args: string) => ({ command: 'savior', args }) as never
+
+// Another thread is another session id over the same store; the tests switch between them.
+test('a thread turned off never pauses, while another thread still does', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.command.run(savior('thread off'))
+  expect((await $.command.run(savior(''))).text).toContain('off in this thread')
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.forks).toBe(0)
+
+  seen.sessionId = 's2'
+  expect((await $.command.run(savior(''))).text).toContain('pauses at 5-hour 96%')
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.forks).toBe(1)
+})
+
+test('a thread turned off ignores a pause from another thread', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  seen.sessionId = 's2'
+  await $.session.measure(measure(97))
+  await clock.settle()
+
+  seen.sessionId = 's1'
+  await $.command.run(savior('thread off'))
+  expect((await $.prompt.submit(typed('keep going'))).drop).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', input: { command: 'ls' } } as never)).deny).toBeUndefined()
+  const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface: 'terminal', ...BAND })
+  expect(await ui.find({ key: 'savior' })).toBeUndefined()
+  await ui.unmount()
+
+  // The pause stays for the thread it belongs to.
+  seen.sessionId = 's2'
+  expect((await $.command.run(savior(''))).text).toContain('Paused at 5-hour 97%')
+  // One module stands in for both threads here, so arm the wait under s2 again;
+  // its ticks then run as s1, which is off.
+  await $.command.run(savior('thread on'))
+  seen.sessionId = 's1'
+  // Nothing resumes into the thread that is off.
+  await clock.set(Date.parse(RESET) + 10 * 60_000)
+  expect(seen.submitted).toEqual(['keep going'])
+})
+
+test('turning off the thread that tripped the pause ends it', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  await $.command.run(savior('thread off'))
+
+  seen.sessionId = 's2'
+  expect((await $.command.run(savior(''))).text).toContain('on-demand-savior is on')
+})
+
+test('turning a thread back on shows a pause in force again', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  seen.sessionId = 's2'
+  await $.session.measure(measure(97))
+  await clock.settle()
+
+  seen.sessionId = 's1'
+  await $.command.run(savior('thread off'))
+  await $.command.run(savior('thread on'))
+  const ui = await $.ui.mount({ plugin: 'on-demand-savior', surface: 'terminal', ...BAND })
+  expect((await ui.find({ key: 'savior' }))?.text).toContain('Paused at 5-hour 97%')
+  await ui.unmount()
+  expect((await $.prompt.submit(typed('keep going'))).drop).toBeDefined()
+})
+
+test('with the handoff off, a pause writes no doc and resumes with the plain prompt', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.command.run(savior('handoff off'))
+  expect((await $.command.run(savior(''))).text).toContain('writes no handoff doc')
+  await $.turn.start({ text: 'build it', turnId: 't1' })
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.aborted).toEqual(['t1'])
+  expect(seen.forks).toBe(0)
+  expect(seen.files).toEqual({})
+  expect(seen.opened).toEqual([])
+  expect((await $.prompt.submit(typed('keep going'))).drop).toContain('Paused at 5-hour 97%')
+
+  await clock.set(Date.parse(RESET) + 90_000)
+  expect(seen.submitted).toHaveLength(1)
+  expect(seen.submitted[0]).toContain('where you left off')
+})
+
+test('handoff on writes the doc again', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  await $.command.run(savior('handoff off'))
+  await $.command.run(savior('handoff on'))
+  expect((await $.command.run(savior(''))).text).not.toContain('handoff doc')
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.files[HANDOFF]).toBe('# Handoff\nGoal: ship it')
+})
+
+test("a thread's switches are kept under its id, so a reload or resume finds them", async ($, on) => {
+  const { seen, clock } = engine(on, { 'thread:s1': { isOff: true } })
+  await $.session.start({ cwd: CWD } as never)
+  await $.session.measure(measure(97))
+  await clock.settle()
+  expect(seen.forks).toBe(0)
+  expect((await $.command.run(savior(''))).text).toContain('off in this thread')
+})
+
+test('an unknown action lists the thread and handoff switches', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  expect((await $.command.run(savior('thread maybe'))).text).toContain('handoff on|off or thread on|off')
+})
+
+test('/savior resume in a thread that is off leaves the other thread paused', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  seen.sessionId = 's2'
+  await $.session.measure(measure(97))
+  await clock.settle()
+
+  seen.sessionId = 's1'
+  await $.command.run(savior('thread off'))
+  expect((await $.command.run(savior('resume'))).text).toContain('off in this thread')
+  await clock.settle()
+  expect(seen.submitted).toEqual([])
+  seen.sessionId = 's2'
+  expect((await $.command.run(savior(''))).text).toContain('Paused at 5-hour 97%')
+})
+
+test('at the reset the thread that paused resumes; another waits, then takes over', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  seen.sessionId = 's2'
+  await $.session.measure(measure(97))
+  await clock.settle()
+
+  // s2 is gone: its wait now ticks as s1.
+  seen.sessionId = 's1'
+  await clock.set(Date.parse(RESET) + 90_000)
+  expect(seen.submitted).toEqual([])
+  await clock.set(Date.parse(RESET) + 4 * 60_000)
+  expect(seen.submitted).toHaveLength(1)
+  expect(seen.submitted[0]).toContain('Goal: ship it')
+})
+
+
+test('turning a thread on after a pause outlived its reset still ends that pause', async ($, on) => {
+  const { seen, clock } = engine(on)
+  await $.session.start({ cwd: CWD } as never)
+  seen.sessionId = 's2'
+  await $.session.measure(measure(97))
+  await clock.settle()
+  seen.sessionId = 's1'
+  await $.command.run(savior('thread off'))
+  await clock.set(Date.parse(RESET) + 10 * 60_000)
+
+  await $.command.run(savior('thread on'))
+  await clock.advance(30_000)
+  expect(seen.submitted).toHaveLength(1)
+  expect((await $.command.run(savior(''))).text).toContain('on-demand-savior is on')
 })

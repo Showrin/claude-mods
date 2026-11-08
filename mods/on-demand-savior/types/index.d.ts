@@ -1,8 +1,11 @@
 /** What trips a pause: the window to wait out, and why, as the status line says it. */
 export type Trip = { kind: string; resetsAt: string; reason: string }
 
-/** A pause in one project: what tripped it and the handoff written for it. */
-export type Pause = Trip & { pausedAt: number; handoffPath?: string }
+/** A pause in one project: what tripped it, the thread it tripped in and the handoff written for it. */
+export type Pause = Trip & { pausedAt: number; sessionId?: string; handoffPath?: string }
+
+/** One thread's own switches: unguarded, or guarded with no handoff doc. */
+export type Thread = { isOff?: boolean; isHandoffOff?: boolean }
 
 /** The settings: each window's threshold, the on-demand budget (0: none) and the handoff folder ('' : the project's). */
 export type Settings = { fiveHour: number; weekly: number; budgetUsd: number; handoffDir: string }

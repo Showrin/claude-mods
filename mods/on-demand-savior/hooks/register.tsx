@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ConfigRow, EngineInterface, Register, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
 
-import type { Pause, Settings, Spend, Trip } from '../types'
+import type { Pause, Settings, Spend, Thread, Trip } from '../types'
 
 const COMMAND = 'savior'
 // The pause in force, mirrored from the store for what the band draws.
@@ -15,6 +15,9 @@ const DEFAULT_THRESHOLD = 96
 // Resume a minute after the reset, so the first request lands in the new window.
 const GRACE_MS = 60_000
 const POLL_MS = 30_000
+// Past the reset, a thread that did not pause waits this long for the one that did
+// (it may be closed), then takes the resume over.
+const TAKEOVER_MS = 2 * 60_000
 const DAY = 24 * 60 * 60 * 1000
 
 export const label = (kind: string) => LABELS[kind] ?? kind.replace(/_/g, ' ')
@@ -172,6 +175,25 @@ async function isEnabled($: EngineInterface) {
   return (await $.store.get('enabled')) !== false
 }
 
+// A thread's own switches, kept under its session id so a reload or --resume keeps them.
+// A key outlives its thread (a /clear starts a new id); it holds two flags, so it stays.
+async function threadKey($: EngineInterface) {
+  return `thread:${await $.session.id()}`
+}
+
+async function getThread($: EngineInterface) {
+  return ((await $.store.get(await threadKey($))) ?? {}) as Thread
+}
+
+async function setThread($: EngineInterface, patch: Thread) {
+  const next = { ...(await getThread($)), ...patch }
+  if (next.isOff || next.isHandoffOff) {
+    await $.store.set(await threadKey($), next)
+  } else {
+    await $.store.delete(await threadKey($))
+  }
+}
+
 async function getPause($: EngineInterface) {
   return (await $.store.get(await key($))) as Pause | undefined
 }
@@ -197,10 +219,10 @@ async function closeHandoff($: EngineInterface) {
   await $.ui.close({ id: PANE }).catch(() => undefined)
 }
 
-// The pause in force: enabled, and its window not yet reset.
+// The pause in force: enabled, on in this thread, and its window not yet reset.
 async function active($: EngineInterface) {
   const pause = await getPause($)
-  if (!pause || !(await isEnabled($))) {
+  if (!pause || !(await isEnabled($)) || (await getThread($)).isOff) {
     return undefined
   }
 
@@ -212,12 +234,37 @@ function stopPoll() {
   poll = undefined
 }
 
+// Shows a pause in force in this thread: the band, the wait for the reset, the handoff.
+async function showPause($: EngineInterface, pause: Pause) {
+  await update($, pauseState, () => pause)
+  arm($)
+  const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
+  if (doc) {
+    await showHandoff($, doc)
+  }
+}
+
+// Hides a pause from this thread only; the store keeps it for the others.
+async function hidePause($: EngineInterface) {
+  stopPoll()
+  await update($, pauseState, () => null)
+  await closeHandoff($)
+}
+
+// Whether this thread tripped the pause; one from an older version has no owner.
+async function isOwner($: EngineInterface, pause: Pause) {
+  return !pause.sessionId || pause.sessionId === (await $.session.id())
+}
+
 // A resume before the reset ('early', the person's choice) also quiets the
 // checks on that window until it resets: its readings stay past the threshold.
 async function resume($: EngineInterface, isEarly = false) {
   const pause = await getPause($)
   stopPoll()
+  // Gone already (another thread resumed it): only this thread's band is left.
   if (!pause) {
+    await hidePause($)
+
     return
   }
   if (isEarly) {
@@ -236,9 +283,9 @@ function arm($: EngineInterface) {
   }
   poll = $.clock.every(POLL_MS, async () => {
     const pause = await getPause($)
-    if (!pause || !(await isEnabled($))) {
-      stopPoll()
-    } else if ((await $.clock.now()) >= resumesAt(pause)) {
+    if (!pause || !(await isEnabled($)) || (await getThread($)).isOff) {
+      await hidePause($)
+    } else if ((await $.clock.now()) >= resumesAt(pause) + ((await isOwner($, pause)) ? 0 : TAKEOVER_MS)) {
       await resume($)
     }
   })
@@ -251,10 +298,18 @@ async function pauseSession($: EngineInterface, trip: Trip) {
   isPausing = true
   try {
     const now = await $.clock.now()
-    const paused: Pause = { ...trip, pausedAt: now }
+    const paused: Pause = { ...trip, pausedAt: now, sessionId: await $.session.id() }
     await savePause($, paused)
     if (turnId) {
       await $.turn.abort({ turnId }).catch(() => undefined)
+    }
+    // No handoff in this thread: the pause alone, and the plain prompt at the reset.
+    if ((await getThread($)).isHandoffOff) {
+      if (await getPause($)) {
+        arm($)
+      }
+
+      return
     }
 
     const reply = await $.model.fork({ prompt: handoffPrompt(paused) })
@@ -301,7 +356,7 @@ async function spentTrip($: EngineInterface, limits: readonly SessionRateLimit[]
 }
 
 async function check($: EngineInterface, limits: readonly SessionRateLimit[], costUsd: number | undefined) {
-  if (isPausing || !(await isEnabled($)) || (await getPause($))) {
+  if (isPausing || !(await isEnabled($)) || (await getThread($)).isOff || (await getPause($))) {
     return
   }
   const now = await $.clock.now()
@@ -316,27 +371,49 @@ async function check($: EngineInterface, limits: readonly SessionRateLimit[], co
   }
 }
 
+// What this thread does differently, for the status line.
+async function threadNote($: EngineInterface) {
+  return (await getThread($)).isHandoffOff ? ' This thread writes no handoff doc (/savior handoff on to write one).' : ''
+}
+
+// Guarding again: show a pause in force, wait out one past its reset, or check the last reading.
+async function guard($: EngineInterface) {
+  const pause = await getPause($)
+  if (pause && (await active($))) {
+    await showPause($, pause)
+  } else if (pause) {
+    arm($)
+  } else {
+    const usage = await $.session.usage()
+    await check($, usage.rateLimits, usage.cost?.usd)
+  }
+}
+
 async function status($: EngineInterface) {
   if (!(await isEnabled($))) {
     return 'on-demand-savior is off: at the limit, Claude goes on into on-demand usage. /savior on to guard again.'
+  }
+  if ((await getThread($)).isOff) {
+    return 'on-demand-savior is off in this thread: at the limit, it goes on into on-demand usage; other threads stay guarded. /savior thread on to guard it again.'
   }
   const pause = await active($)
   if (pause) {
     const handoff = pause.handoffPath ? ` Handoff: ${pause.handoffPath}.` : ''
 
-    return `${pausedLine(pause, await $.clock.now())}.${handoff} /savior resume to go on now (may use on-demand usage).`
+    return `${pausedLine(pause, await $.clock.now())}.${handoff} /savior resume to go on now (may use on-demand usage).${await threadNote($)}`
   }
 
   const now = await $.clock.now()
   const quiet = await quietUntil($)
   if (now < quiet) {
-    return `on-demand-savior is on, but resumed early: the paused limit's checks are off until ${clockTime(quiet, now)}, when it resets. /savior on to check again now.`
+    return `on-demand-savior is on, but resumed early: the paused limit's checks are off until ${clockTime(quiet, now)}, when it resets. /savior on to check again now.${await threadNote($)}`
   }
   const { fiveHour, weekly, budgetUsd } = await current($)
-
-  return budgetUsd > 0
+  const guard = budgetUsd > 0
     ? `on-demand-savior is on: lets ${usd(budgetUsd)} of on-demand usage through once a limit is used up, then pauses.`
     : `on-demand-savior is on: pauses at 5-hour ${fiveHour}% or weekly ${weekly}%.`
+
+  return guard + (await threadNote($))
 }
 
 export const register: Register = (on, options) => {
@@ -348,28 +425,36 @@ export const register: Register = (on, options) => {
     $.ui.status(undefined)
     await $.command.register({
       name: COMMAND,
-      description: 'Guard against on-demand usage: on, off, status, resume now, or show the handoff',
-      argumentHint: '[on|off|status|resume|handoff]',
+      description: 'Guard against on-demand usage: on, off, status, resume now, the handoff, or this thread alone',
+      argumentHint: '[on|off|status|resume|handoff [on|off]|thread on|off]',
       immediate: true,
     })
     // A pause from an earlier session in this project: wait it out, or resume
     // from its handoff right away if the window already reset.
     const pause = await getPause($)
-    if (pause && (await isEnabled($))) {
-      await update($, pauseState, () => pause)
-      arm($)
-      const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).catch(() => undefined) : undefined
-      if (doc) {
-        await showHandoff($, doc)
-      }
+    if (pause && (await isEnabled($)) && !(await getThread($)).isOff) {
+      await showPause($, pause)
     }
 
     return result
   })
 
   on('command.run', { command: COMMAND }, async ($, e) => {
-    const action = e.args.trim().toLowerCase()
-    if (action === 'off') {
+    const action = e.args.trim().toLowerCase().replace(/\s+/g, ' ')
+    if (action === 'thread off') {
+      await setThread($, { isOff: true })
+      const pause = await getPause($)
+      // A pause this thread tripped ends with it; one from another thread stays for that thread.
+      if (pause && pause.sessionId === (await $.session.id())) {
+        await savePause($, undefined)
+      }
+      await hidePause($)
+    } else if (action === 'thread on') {
+      await setThread($, { isOff: false })
+      await guard($)
+    } else if (action === 'handoff off' || action === 'handoff on') {
+      await setThread($, { isHandoffOff: action === 'handoff off' })
+    } else if (action === 'off') {
       await $.store.set('enabled', false)
       await savePause($, undefined)
       await closeHandoff($)
@@ -378,9 +463,11 @@ export const register: Register = (on, options) => {
       await $.store.set('enabled', true)
       await $.store.delete(await quietKey($))
       // The last reading may already be past the threshold; no new point may come.
-      const usage = await $.session.usage()
-      await check($, usage.rateLimits, usage.cost?.usd)
+      await guard($)
     } else if (action === 'resume') {
+      if ((await getThread($)).isOff) {
+        return { text: 'on-demand-savior is off in this thread, so nothing is paused here.' }
+      }
       if (!(await getPause($))) {
         return { text: 'on-demand-savior: nothing is paused.' }
       }
@@ -397,7 +484,7 @@ export const register: Register = (on, options) => {
 
       return { text: `on-demand-savior: showing the handoff from ${pause!.handoffPath}.` }
     } else if (action !== '' && action !== 'status') {
-      return { text: `on-demand-savior: unknown "${action}". Use /savior on, off, status, resume or handoff.` }
+      return { text: `on-demand-savior: unknown "${action}". Use /savior on, off, status, resume, handoff, handoff on|off or thread on|off.` }
     }
 
     return { text: await status($) }

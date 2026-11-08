@@ -16,12 +16,16 @@ The handoff opens in a side pane on the right, with the same button. A pane open
 | Command | What it does |
 | --- | --- |
 | `/savior` or `/savior status` | Whether it is on, and any pause in force |
-| `/savior off` | Stop guarding (and clear a pause): Claude goes on into on-demand usage |
+| `/savior off` | Stop guarding every thread (and clear a pause): Claude goes on into on-demand usage |
 | `/savior on` | Guard again, ending an early resume's quiet; pauses at once if the last reading is already past the threshold |
 | `/savior resume` | Resume from the handoff now, before the reset. Checks on that limit stay off until it resets, so this may use on-demand usage; other limits still pause |
 | `/savior handoff` | Show the handoff in the side pane |
+| `/savior thread off` | Stop guarding this thread only: it never pauses and ignores a pause another thread hit; a pause this thread hit ends |
+| `/savior thread on` | Guard this thread again; shows a pause in force, or pauses at once if the last reading is past the threshold |
+| `/savior handoff off` | This thread still pauses, but writes no handoff (no extra model call) and resumes with a plain "carry on" prompt |
+| `/savior handoff on` | Write the handoff again in this thread |
 
-On or off is remembered across sessions.
+On or off is remembered across sessions. A thread's own switches are kept with that thread, so they come back when you resume it, and a new thread starts guarded with a handoff.
 
 ## Settings
 
@@ -41,9 +45,9 @@ With a budget above `0`, the thresholds step aside: the limit runs full, on-dema
 ## Good to know
 
 - The pause comes from a usage reading, and one arrives after each model response, so it can land a point or two past the threshold. Turning off extra usage in your claude.ai settings is the hard stop; this mod is the graceful one.
-- Writing the handoff is one more model call, which is what the room below 100% is for.
+- Writing the handoff is one more model call, which is what the room below 100% is for. `/savior handoff off` skips it in that thread.
 - The resume needs Claude Code open. Closed, the next session in the same project finds the pause and resumes from its handoff once the window has reset.
-- A pause belongs to the project it happened in.
+- A pause belongs to the project it happened in: it holds every guarded thread there, not only the one that hit the limit. At the reset, the thread that paused resumes from its handoff; another thread takes over two minutes later only if that one has not (it may be closed).
 - A setting changed in `/config` counts from the next usage reading; no `/reload-plugins` needed. With two copies of the plugin installed (say, one from the marketplace and one from `--plugin-dir`), it cannot tell which settings are its own, so it keeps the ones it loaded with until `/reload-plugins`: keep one copy.
 
 ## Develop
